@@ -1,0 +1,60 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL": "beta",
+        "EXPO_PUBLIC_TIEZ_UPDATE_ENDPOINT": "https://tiez.name666.top/api/v1/latest-version"
+      }
+    },
+    "preview": {
+      "env": {
+        "EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL": "beta",
+        "EXPO_PUBLIC_TIEZ_UPDATE_ENDPOINT": "https://tiez.name666.top/api/v1/latest-version"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "simulator": true
+      }
+    },
+    "ipa": {
+      "env": {
+        "EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL": "beta",
+        "EXPO_PUBLIC_TIEZ_UPDATE_ENDPOINT": "https://tiez.name666.top/api/v1/latest-version"
+      },
+      "ios": {
+        "distribution": "internal"
+      }
+    },
+    "beta": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL": "beta",
+        "EXPO_PUBLIC_TIEZ_UPDATE_ENDPOINT": "https://tiez.name666.top/api/v1/latest-version"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL": "stable",
+        "EXPO_PUBLIC_TIEZ_UPDATE_ENDPOINT": "https://tiez.name666.top/api/v1/latest-version"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
