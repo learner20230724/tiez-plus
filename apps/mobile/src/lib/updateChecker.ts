@@ -22,7 +22,7 @@ const AUTO_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const LAST_AUTO_CHECK_KEY = 'tiez:last-auto-update-check';
 
 export const RELEASE_CHANNEL: ReleaseChannel =
-  process.env.EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL === 'beta' ? 'beta' : 'stable';
+  process.env.EXPO_PUBLIC_TIEZ_PLUS_RELEASE_CHANNEL === 'beta' ? 'beta' : 'stable';
 
 const UPDATE_ENDPOINT =
   process.env.EXPO_PUBLIC_TIEZ_PLUS_UPDATE_ENDPOINT?.trim() || DEFAULT_UPDATE_ENDPOINT;

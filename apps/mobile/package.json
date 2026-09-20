@@ -8,10 +8,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "validate:versions": "node scripts/validate-versions.mjs",
-    "release:stable:android": "node scripts/build-release.mjs android stable",
-    "release:stable:ios": "node scripts/build-release.mjs ios stable",
-    "release:beta:android": "node scripts/build-release.mjs android beta",
-    "release:beta:ios": "node scripts/build-release.mjs ios beta",
+    "build:release:android": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../scripts/build-android.ps1",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -58,5 +55,5 @@
     "typescript": "~5.9.2"
   },
   "license": "GPL-3.0-only",
-  "private": false
+  "private": true
 }

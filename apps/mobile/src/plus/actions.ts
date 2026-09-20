@@ -1,5 +1,8 @@
 import type { Draft } from './store';
 export interface Remote { request(type: string, fields?: Record<string, unknown>): Promise<any> }
+export function draftSnapshotMatches(saved: Draft[], current: Draft[]): boolean {
+  return saved.length === current.length && saved.every(d => current.some(c => c.id === d.id && c.revision === d.revision && c.content === d.content));
+}
 export function mergeDrafts(persisted: Draft[], local: Draft[]): Draft[] {
   const remaining = new Map(local.map(d => [d.id, d]));
   const merged = persisted.map(d => {

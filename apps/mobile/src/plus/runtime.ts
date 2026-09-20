@@ -83,13 +83,13 @@ export async function connect(endpoint: Endpoint) {
   finally { runtime.connecting = false; notify(); }
 }
 async function probe(c: PlusConnection) {
-  try { const response = await c.request('ping'); runtime.ready = response.ok === true; runtime.status = runtime.ready ? `${c.endpoint.name} · 电脑已就绪` : '服务可达，电脑尚未就绪'; }
-  catch { runtime.ready = false; runtime.status = '服务可达，但电脑程序未响应'; }
+  try { const response = await c.request('ping'); if (runtime.connection !== c || !c.connected) return; runtime.ready = response.ok === true; runtime.status = runtime.ready ? `${c.endpoint.name} · 电脑已就绪` : '服务可达，电脑尚未就绪'; }
+  catch { if (runtime.connection !== c) return; runtime.ready = false; runtime.status = '服务可达，但电脑程序未响应'; }
   notify();
 }
 let nativeSubscriptions: Array<{remove(): void}> = [];
 export async function startDiscovery() {
-  await init(); if (active) return; active = true; await runtime.store!.prune();
+  await init(); if (active) return; active = true; await runtime.store!.prune(); if (!active) return;
   const native = NativeModules.PlusDiscovery;
   if (native) {
     const emitter = new NativeEventEmitter(native);
@@ -127,7 +127,7 @@ export async function sendRecord(record: Outbox) {
     if (result.status !== 'delivered') throw new Error(result.error || '电脑未确认完成，内容已保留');
   } catch (error) {
     // Do not overwrite a concrete copy_failed/unknown result with a generic timeout.
-    const row = (await runtime.store!.history()).find(r => r.id === record.id);
+    const row = await runtime.store!.getRecord(record.id);
     if (row?.status === 'sending') await runtime.store!.markUnconfirmed(record.id, error instanceof Error ? error.message : String(error));
     notify(); throw error;
   }

@@ -17,7 +17,7 @@ impl Request {
         if !["send_text","delivery_status","get_current","get_history","get_content","ping"].contains(&self.kind.as_str()) { return Err("UNSUPPORTED_PROTOCOL".into()); }
         if self.kind == "send_text" {
             let text = self.content.as_deref().ok_or("EMPTY_TEXT")?;
-            if text.trim().is_empty() { return Err("EMPTY_TEXT".into()); }
+            if text.is_empty() { return Err("EMPTY_TEXT".into()); }
             if text.len() > MAX_TEXT_BYTES { return Err("TEXT_TOO_LARGE".into()); }
         }
         Ok(())
@@ -81,6 +81,8 @@ pub fn set_state(conn: &Connection, r: &Request, state: &str) -> Result<(), Stri
         assert!(receipt(&conn,"phone","msg-1").unwrap().is_none());
     }
     #[test] fn bytes_not_characters_limit() {
+        assert!(req(" \r\n\t  ").validate("pc").is_ok());
+        assert!(req("").validate("pc").is_err());
         assert!(req(&"🙂".repeat(MAX_TEXT_BYTES/4)).validate("pc").is_ok());
         assert!(req(&"🙂".repeat(MAX_TEXT_BYTES/4+1)).validate("pc").is_err());
     }

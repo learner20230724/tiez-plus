@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import actions from '../apps/mobile/src/plus/actions.ts';
 import P from '../protocol/index.cjs';
 const { mergeDrafts,readComputer,readEntry,copyText }=actions;
+test('saved indicator only acknowledges the exact complete editor snapshot',()=>{
+  const saved=[{id:'a',revision:1,content:'original',updated_at:1}];
+  assert.equal(actions.draftSnapshotMatches(saved,saved),true);
+  assert.equal(actions.draftSnapshotMatches(saved,[{...saved[0],revision:2,content:'continued editing'}]),false);
+  assert.equal(actions.draftSnapshotMatches(saved,[...saved,{...saved[0],id:'new'}]),false);
+  assert.equal(actions.draftSnapshotMatches(saved,[]),false);
+});
 test('ACK clear and unsaved editor at the same revision keep new editing',()=>{
   const base={id:'a',revision:2,updated_at:1};
   assert.equal(mergeDrafts([{...base,content:''}],[{...base,content:'new unsaved edit'}])[0].content,'new unsaved edit');
@@ -33,6 +40,7 @@ test('UTF-8 limit counts bytes including surrogate pairs and does not rewrite te
   for(const text of ['a','中','🙂','a\ud800b','\u0000\n\r\t','  a  ']) assert.equal(P.textBytes(text),Buffer.byteLength(text));
   const message={v:1,id:'m',requestId:'r',from:'p',to:'d',type:'send_text',content:'🙂'.repeat(P.MAX_TEXT_BYTES/4)};
   assert.equal(P.validateRequest(message).content,message.content);
+  assert.equal(P.validateRequest({...message,content:' \r\n\t  '}).content,' \r\n\t  ');
   assert.throws(()=>P.validateRequest({...message,content:message.content+'a'}),/TEXT_TOO_LARGE/);
 });
 

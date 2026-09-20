@@ -9,8 +9,10 @@ if (-not $letter) { throw 'No unused drive letter for isolated Android build' }
 & subst.exe ($letter + ':') $root
 if ($LASTEXITCODE -ne 0) { throw 'Unable to map isolated Android build directory' }
 $mapped = $letter + ':\'
-$old = @{ JAVA_HOME=$env:JAVA_HOME; ANDROID_HOME=$env:ANDROID_HOME; ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT; GRADLE_USER_HOME=$env:GRADLE_USER_HOME; PATH=$env:PATH; CI=$env:CI; JAVA_OPTS=$env:JAVA_OPTS; EXPO_NO_TELEMETRY=$env:EXPO_NO_TELEMETRY; TEMP=$env:TEMP; TMP=$env:TMP }
+$old = @{ JAVA_HOME=$env:JAVA_HOME; ANDROID_HOME=$env:ANDROID_HOME; ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT; GRADLE_USER_HOME=$env:GRADLE_USER_HOME; PATH=$env:PATH; CI=$env:CI; JAVA_OPTS=$env:JAVA_OPTS; EXPO_NO_TELEMETRY=$env:EXPO_NO_TELEMETRY; TEMP=$env:TEMP; TMP=$env:TMP; NODE_OPTIONS=$env:NODE_OPTIONS; TIEZ_PLUS_BUILD_ROOT=$env:TIEZ_PLUS_BUILD_ROOT; TIEZ_PLUS_BUILD_DRIVE=$env:TIEZ_PLUS_BUILD_DRIVE }
 try {
+  $env:TIEZ_PLUS_BUILD_ROOT = $root; $env:TIEZ_PLUS_BUILD_DRIVE = $mapped
+  $env:NODE_OPTIONS = "$env:NODE_OPTIONS --preserve-symlinks --preserve-symlinks-main --require=$(Join-Path $mapped 'scripts\mapped-paths.cjs')"
   $env:TEMP = Join-Path $mapped '.runtime\android-temp'; $env:TMP = $env:TEMP
   New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
   $env:JAVA_HOME = Join-Path $mapped '.runtime\jdk17'
@@ -31,7 +33,7 @@ try {
   }
   # Licenses apply only to the private SDK used to build this requested APK.
   (1..100 | ForEach-Object { 'y' }) | & $manager @proxyArgs "--sdk_root=$env:ANDROID_HOME" --licenses
-  & $manager @proxyArgs "--sdk_root=$env:ANDROID_HOME" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+  & $manager @proxyArgs "--sdk_root=$env:ANDROID_HOME" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'build-tools;35.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
   if ($LASTEXITCODE -ne 0) { throw 'Private Android SDK package installation failed' }
   if ($PrepareOnly) { return }
   $secrets = Join-Path $mapped '.secrets'
@@ -55,9 +57,11 @@ try {
   try {
     & node.exe node_modules/expo/bin/cli prebuild --platform android --no-install
     if ($LASTEXITCODE -ne 0) { throw 'Expo prebuild failed' }
+    & node.exe (Join-Path $mapped 'scripts\normalize-autolinking.cjs')
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to normalize private autolinking cache' }
     Push-Location android
     try {
-      & .\gradlew.bat assembleRelease '-PreactNativeArchitectures=arm64-v8a' '--no-daemon' '--max-workers=2' '-Dorg.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8'
+      & .\gradlew.bat assembleRelease '-PreactNativeArchitectures=arm64-v8a' '--init-script' (Join-Path $mapped 'scripts\android-paths.init.gradle') '--no-daemon' '--max-workers=2' '-Dorg.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8'
       if ($LASTEXITCODE -ne 0) { throw 'Android release build failed' }
     } finally { Pop-Location }
     $artifact = Join-Path $mapped 'artifacts\TIEZ-Plus-0.1.0-arm64-v8a.apk'

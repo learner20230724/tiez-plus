@@ -1,0 +1,14 @@
+// RN 0.81's autolinking CMake generator does not escape Windows backslashes.
+// Normalize only its generated CMake file, never dependencies or user sources.
+allprojects {
+    tasks.configureEach { task ->
+        if (task.name == 'generateAutolinkingNewArchitectureFiles') {
+            task.doLast {
+                def generated = new File(project.buildDir, 'generated/autolinking/src/main/jni/Android-autolinking.cmake')
+                if (generated.exists()) {
+                    generated.setText(generated.getText('UTF-8').replace('\\', '/'), 'UTF-8')
+                }
+            }
+        }
+    }
+}

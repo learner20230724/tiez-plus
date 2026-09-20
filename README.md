@@ -72,8 +72,9 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib plus_
 ```
 
 - 调试编译桌面程序默认是隔离模式，不启用剪贴板监控、Plus MQTT 客户端或热键。自动化测试只用 mock 剪贴板和临时 SQLite。不要在当前工作电脑做真实粘贴测试。
-- Android JDK、SDK、Node 22、Gradle 缓存全部在 `.runtime`；为避免 Windows 中文路径工具链崩溃，脚本临时映射一个空闲盘符，并在 `finally` 解除自己建立的映射。没有改变系统 PATH/Java/SDK。
+- Android JDK、SDK、Node 22、Gradle 缓存和临时文件全部在 `.runtime`；为避免 Windows 中文路径工具链崩溃，脚本临时映射一个空闲盘符，并规范化自动生成的 autolinking/CMake 路径，在 `finally` 解除自己建立的映射。没有改变系统 PATH/Java/SDK，也没有修改依赖源码。
 - 首次构建下载工具链，需要网络。脚本识别当前 HTTP(S) 代理，配置仅作用于私有构建环境。
 - `.secrets` 保存独立 Android release keystore 与密码，只允许当前用户/SYSTEM 读取。**请备份；丢失会影响后续原地更新。不能提交或随安装包发布。**
 - `artifacts` 只放构建产物和校验文件；脚本不运行安装包、不连接 ADB、不安装服务。
 - 来源与选择性移植记录见 `docs/UPSTREAM.md`，协议见 `docs/PROTOCOL.md`。GPL-3.0 与上游版权信息保留；原 Broker 的 MIT 许可证另见其目录。
+- 本次构建与自动化结果见 `docs/TEST-RESULTS.md`；待做的实机项目见 `docs/ACCEPTANCE.md`。Android 禁用系统自动备份，避免把手机草稿和发件正文交给系统云备份。

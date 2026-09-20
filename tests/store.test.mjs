@@ -54,3 +54,14 @@ test('late ACK is monotonic and a different target cannot confirm a message',asy
   await store.applyResult(r.id,{...target,desktopId:'other'},'delivered');assert.equal((await store.history())[0].status,'saved');
   await store.applyResult(r.id,target,'delivered');await store.markUnconfirmed(r.id,'late timeout');await store.applyResult(r.id,target,'unknown');assert.equal((await store.history())[0].status,'delivered');
 });
+
+
+test('history pages use summaries but search and detail read the complete original',async t=>{
+  const {db,store}=setup();t.after(()=>db.close());await store.init();
+  const content='前'.repeat(400)+'全文搜索命中'+'尾'.repeat(10000);
+  const [record]=await store.prepare([{id:'a',content,revision:1,updated_at:1}],target);
+  const rows=await store.listHistory('全文搜索命中');
+  assert.equal(rows.length,1);assert.equal(rows[0].preview.length,300);assert.equal(rows[0].content,undefined);
+  assert.equal((await store.getRecord(record.id)).content,content);
+  assert.equal((await store.listHistory('',100)).length,0);
+});

@@ -12,6 +12,7 @@ export type Outbox = {
   target_instance: string; target_device: string; status: string;
   created_at: number; delivered_at: number | null; error: string | null; attempts: number;
 };
+export type OutboxSummary = Omit<Outbox, 'content'> & {preview: string};
 export class PlusStore {
   private chain: Promise<unknown> = Promise.resolve();
   constructor(private db: Database, private uuid: () => string, private clock = Date.now) {}
@@ -68,7 +69,11 @@ export class PlusStore {
     }));
   }
   history(query = '') { return this.serialized(() => this.db.getAllAsync<Outbox>('SELECT * FROM plus_outbox WHERE instr(content,?)>0 ORDER BY created_at DESC,id DESC', query)); }
-  pending(target: Target) { return this.serialized(() => this.db.getAllAsync<Outbox>("SELECT * FROM plus_outbox WHERE target_instance=? AND target_device=? AND status<>'delivered' ORDER BY created_at DESC LIMIT 50", target.instanceId, target.desktopId)); }
+  getRecord(id: string) { return this.serialized(() => this.db.getFirstAsync<Outbox>('SELECT * FROM plus_outbox WHERE id=?',id)); }
+  listHistory(query = '', offset = 0) { return this.serialized(() => this.db.getAllAsync<OutboxSummary>(
+    `SELECT id,substr(content,1,300) preview,draft_id,draft_revision,target_instance,target_device,status,created_at,delivered_at,error,attempts
+    FROM plus_outbox WHERE instr(content,?)>0 ORDER BY created_at DESC,id DESC LIMIT 100 OFFSET ?`,query,Math.max(0,Math.floor(offset)))); }
+  pending(target: Target) { return this.serialized(() => this.db.getAllAsync<Pick<Outbox,'id'>>("SELECT id FROM plus_outbox WHERE target_instance=? AND target_device=? AND status<>'delivered' ORDER BY created_at DESC LIMIT 50", target.instanceId, target.desktopId)); }
   remove(id: string) { return this.serialized(() => this.db.runAsync('DELETE FROM plus_outbox WHERE id=?', id)); }
   prune() { return this.serialized(() => this.db.runAsync("DELETE FROM plus_outbox WHERE status='delivered' AND delivered_at IS NOT NULL AND delivered_at<?", this.clock() - 90 * 86400000)); }
   cache(key: string, value: unknown) { return this.serialized(() => this.db.runAsync('INSERT OR REPLACE INTO plus_cache VALUES(?,?)', key, JSON.stringify(value))); }

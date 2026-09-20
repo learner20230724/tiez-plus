@@ -21,7 +21,7 @@ function validateRequest(m) {
   if (!m || m.v !== VERSION || !REQUEST_TYPES.includes(m.type)) throw new Error('UNSUPPORTED_PROTOCOL');
   for (const field of ['id', 'requestId', 'from', 'to']) if (!validId(m[field])) throw new Error('INVALID_ID');
   if (m.type === 'send_text') {
-    if (typeof m.content !== 'string' || !m.content.trim()) throw new Error('EMPTY_TEXT');
+    if (typeof m.content !== 'string' || m.content.length === 0) throw new Error('EMPTY_TEXT');
     if (textBytes(m.content) > MAX_TEXT_BYTES) throw new Error('TEXT_TOO_LARGE: 单条文本超过 UTF-8 1 MiB，完整内容已保留，未截断发送');
   }
   if (m.type === 'get_content' && (typeof m.entryId !== 'string' || m.entryId.length > 150)) throw new Error('INVALID_ENTRY');

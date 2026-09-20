@@ -19,14 +19,7 @@ if (packageJson.version !== appConfig.expo.version) {
 if (!Object.values(versions).some(platforms => Object.values(platforms).includes(packageJson.version))) {
   throw new Error(`Active version ${packageJson.version} is not declared in versions.json`);
 }
-if (easConfig.build?.beta?.env?.EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL !== 'beta') {
-  throw new Error('EAS beta profile is not pinned to the beta update channel');
-}
-if (easConfig.build?.production?.env?.EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL !== 'stable') {
-  throw new Error('EAS production profile is not pinned to the stable update channel');
-}
-if (easConfig.build?.production?.android?.buildType !== 'apk') {
-  throw new Error('Android stable profile must produce an APK for direct updates');
-}
+if (appConfig.expo.owner || appConfig.expo.extra?.eas?.projectId || easConfig.submit) throw new Error('Plus must not bind to an upstream build account');
+if (appConfig.expo.android.package !== 'io.github.learner20230724.tiezplus') throw new Error('Plus package identity mismatch');
 
 console.log(`Mobile versions are valid; active source version is ${packageJson.version}.`);

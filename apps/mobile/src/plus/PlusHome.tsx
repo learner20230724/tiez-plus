@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, AppState, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { runtime, init, subscribe, startDiscovery, stopDiscovery, connect, inspectEndpoint, sendDrafts, sendRecord, uuid } from './runtime';
-import type { Draft, Outbox } from './store';
+import type { Draft, Outbox, OutboxSummary } from './store';
 import type { Endpoint } from './transport';
-import { mergeDrafts, readComputer, readEntry, copyText } from './actions';
+import { mergeDrafts, draftSnapshotMatches, readComputer, readEntry, copyText } from './actions';
 import { fetchWebDavEntries, loadMobileSyncSettings, type SyncedEntry } from '../lib/sync';
 const copy = (text: string) => copyText(text, Clipboard.setStringAsync);
 
@@ -16,13 +17,16 @@ const stateName: Record<string, string> = { saved: '已保存，待手动发送'
 
 export default function PlusHome() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const [, tick] = useState(0);
   const [page, setPage] = useState<'send'|'pull'|'history'>('send');
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const draftsRef = useRef<Draft[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [history, setHistory] = useState<Outbox[]>([]);
+  const [history, setHistory] = useState<OutboxSummary[]>([]);
   const [search, setSearch] = useState('');
+  const searchRef = useRef('');
+  const historyOffset = useRef(0);
   const [saved, setSaved] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -40,19 +44,25 @@ export default function PlusHome() {
     if (!runtime.store) return;
     const persisted = await runtime.store.drafts();
     updateDrafts(mergeDrafts(persisted, draftsRef.current));
-    setHistory(await runtime.store.history());
+    await loadHistory();
+  }
+  async function loadHistory() {
+    if (!runtime.store) return;
+    const query=searchRef.current, offset=historyOffset.current;
+    const rows=await runtime.store.listHistory(query,offset);
+    if(query===searchRef.current && offset===historyOffset.current) setHistory(rows);
   }
   async function flush() {
     clearTimeout(saveTimer.current);
     if (!runtime.store) throw new Error('本地数据库尚未就绪，文字未发送');
     const snapshot = draftsRef.current.map(d => ({...d}));
     for (const d of snapshot) await runtime.store.saveDraft(d);
-    if (snapshot.every(d => draftsRef.current.find(x => x.id === d.id)?.revision === d.revision)) setSaved('已保存到手机');
+    if (draftSnapshotMatches(snapshot, draftsRef.current)) setSaved('已保存到手机');
   }
   async function addDraft(content = '') {
     const d = { id: uuid(), content, revision: 1, updated_at: Date.now() };
     updateDrafts([...draftsRef.current, d]); setSelected(ids => [...ids, d.id]); setPage('send'); setSaved('保存中…');
-    try { await runtime.store!.saveDraft(d); setSaved('已保存到手机'); } catch { setSaved('保存失败，勿退出应用'); }
+    try { await flush(); } catch { setSaved('保存失败，勿退出应用'); }
   }
   function edit(id: string, content: string) {
     updateDrafts(draftsRef.current.map(d => d.id === id ? { ...d, content, revision: d.revision + 1, updated_at: Date.now() } : d));
@@ -93,18 +103,19 @@ export default function PlusHome() {
       if (state === 'active') { void startDiscovery().catch(showError); void reload().catch(showError); }
       else { void flush().catch(() => {}); stopDiscovery(); }
     });
+    const blur = navigation.addListener('blur', () => { void flush().catch(showError); });
     const handleLink = async ({url}: {url: string}) => {
       if (!url.startsWith('tiezplus://')) return;
       await init();
       if (url.includes('sync-pull')) { await perform(pullNow); }
       else if (url.includes('sync-push') || url.includes('sync-now')) {
         const text = await Clipboard.getStringAsync();
-        if (text.trim()) { await addDraft(text); Alert.alert('已保存为草稿', '检查内容后点“发送所选”；不会在后台自动发送。'); }
+        if (text.length) { await addDraft(text); Alert.alert('已保存为草稿', '检查内容后点“发送所选”；不会在后台自动发送。'); }
       }
     };
     const link = Linking.addEventListener('url', e => { void handleLink(e).catch(showError); });
     void Linking.getInitialURL().then(url => { if (url) return handleLink({url}); }).catch(showError);
-    return () => { alive = false; off(); app.remove(); link.remove(); void flush().catch(() => {}); stopDiscovery(); };
+    return () => { alive = false; off(); blur(); app.remove(); link.remove(); void flush().catch(() => {}); stopDiscovery(); };
   }, []);
   const Button = ({label, onPress, danger = false}: {label: string; onPress: () => void; danger?: boolean}) => <Pressable accessibilityRole="button" disabled={busy} onPress={onPress} style={[s.button, danger && s.danger, busy && {opacity: .5}]}><Text style={s.buttonText}>{label}</Text></Pressable>;
   return <KeyboardAvoidingView style={[s.root, {paddingTop: insets.top}]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -117,7 +128,7 @@ export default function PlusHome() {
         {[...runtime.endpoints.values()].filter(e => Date.now() - e.seen < 45000).map(e => <Pressable key={e.instanceId} onPress={() => { void connect(e); }}><Text style={s.device}>{runtime.selected?.instanceId === e.instanceId ? '● ' : '○ '}{e.name} · {e.host}</Text></Pressable>)}
         <Text style={s.small}>仅用于可信家庭局域网。断线后不自动补发。</Text>
       </View>
-      <View style={s.row}>{(['send', 'pull', 'history'] as const).map((p, i) => <Pressable key={p} onPress={() => setPage(p)} style={[s.tab, page === p && s.activeTab]}><Text style={page === p ? s.activeText : s.strong}>{['发送', '拉取', '手机历史'][i]}</Text></Pressable>)}</View>
+      <View style={s.row}>{(['send', 'pull', 'history'] as const).map((p, i) => <Pressable key={p} onPress={() => {void flush().catch(showError); setPage(p);}} style={[s.tab, page === p && s.activeTab]}><Text style={page === p ? s.activeText : s.strong}>{['发送', '拉取', '手机历史'][i]}</Text></Pressable>)}</View>
       {page === 'send' && <>
         <Text style={s.small}>{saved}</Text>
         {drafts.map((d, index) => <View style={s.card} key={d.id}>
@@ -127,7 +138,7 @@ export default function PlusHome() {
         </View>)}
         <View style={s.row}><Button label="新增草稿" onPress={() => { void addDraft().catch(showError); }}/><Button label="读取手机剪贴板" onPress={() => { void Clipboard.getStringAsync().then(addDraft).catch(showError); }}/></View>
         <Button label={busy ? '处理中…' : '发送所选，等待电脑确认'} onPress={() => { void perform(async () => {
-          const chosen = draftsRef.current.filter(d => selected.includes(d.id) && d.content.trim());
+          const chosen = draftsRef.current.filter(d => selected.includes(d.id) && d.content.length > 0);
           if (!chosen.length) throw new Error('请先选择有内容的草稿');
           await sendDrafts(chosen); Alert.alert('已送达', '电脑已保存内容并完成剪贴板写入。');
         }); }}/>
@@ -151,10 +162,12 @@ export default function PlusHome() {
       </View>}
       {page === 'history'  && <>
         <Text style={s.small}>已送达保留 90 天；失败、待确认和草稿不自动删除。</Text>
-        <TextInput style={s.search} placeholder="搜索手机历史正文" value={search} onChangeText={setSearch}/>
-        {history.filter(r => r.content.includes(search)).map(r => <Pressable key={r.id} style={s.card} onPress={() => setDetail({title: '手机记录全文', content: r.content, record: r})}>
-          <Text style={[s.strong, {color: r.status === 'delivered' ? '#15754e' : '#9a5b12'}]}>{stateName[r.status] || r.status}</Text><Text style={s.body}>{r.content.slice(0, 300)}</Text><Text style={s.small}>{new Date(r.created_at).toLocaleString()} · {r.attempts} 次尝试</Text>{!!r.error && <Text style={s.warning}>{r.error}</Text>}
+        <TextInput style={s.search} placeholder="搜索手机历史正文" value={search} onChangeText={text => {setSearch(text); searchRef.current=text; historyOffset.current=0; void loadHistory().catch(showError);}}/>
+        {history.map(r => <Pressable key={r.id} style={s.card} onPress={() => { void perform(async () => { const full=await runtime.store!.getRecord(r.id); if(!full) throw new Error('记录已删除'); setDetail({title: '手机记录全文', content: full.content, record: full}); }); }}>
+          <Text style={[s.strong, {color: r.status === 'delivered' ? '#15754e' : '#9a5b12'}]}>{stateName[r.status] || r.status}</Text><Text style={s.body}>{r.preview}</Text><Text style={s.small}>{new Date(r.created_at).toLocaleString()} · {r.attempts} 次尝试</Text>{!!r.error && <Text style={s.warning}>{r.error}</Text>}
         </Pressable>)}
+        <Text style={s.small}>第 {Math.floor(historyOffset.current/100)+1} 页 · 搜索匹配全文，不只搜索摘要</Text>
+        <View style={s.row}><Button label="上一页" onPress={() => {historyOffset.current=Math.max(0,historyOffset.current-100); void loadHistory().catch(showError);}}/>{history.length===100 && <Button label="下一页" onPress={() => {historyOffset.current+=100; void loadHistory().catch(showError);}}/>}</View>
       </>}
     </ScrollView>
     <Modal visible={!!detail} animationType="slide" onRequestClose={() => setDetail(null)}><View style={[s.root, {paddingTop: insets.top + 14, padding: 18}]}>

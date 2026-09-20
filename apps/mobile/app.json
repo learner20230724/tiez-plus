@@ -63,7 +63,9 @@
         "android.permission.ACCESS_WIFI_STATE",
         "android.permission.CHANGE_WIFI_MULTICAST_STATE"
       ],
-      "versionCode": 1
+      "versionCode": 1,
+      "allowBackup": false,
+      "blockedPermissions": ["android.permission.SYSTEM_ALERT_WINDOW"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
