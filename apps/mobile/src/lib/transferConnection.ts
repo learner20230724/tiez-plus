@@ -33,7 +33,9 @@ export function parseTransferConnection(rawValue: string): TransferConnection {
 
 export function buildTransferUrl(connection: TransferConnection, path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${connection.baseUrl}${normalizedPath}`;
+  const url = new URL(`${connection.baseUrl}${normalizedPath}`);
+  if (connection.accessToken) url.searchParams.set('auth',connection.accessToken);
+  return url.toString();
 }
 
 export function buildTransferWebSocketUrl(connection: TransferConnection): string {

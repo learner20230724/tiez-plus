@@ -151,6 +151,7 @@ fn main() {
             services::file_transfer::get_local_ip_addr,
             services::file_transfer::get_available_ips,
             services::file_transfer::get_file_server_status,
+            services::file_transfer::get_file_server_session_url,
             services::file_transfer::toggle_file_server,
             services::file_transfer::get_active_file_transfer_path,
             services::paste_queue::get_paste_queue,

@@ -9,24 +9,20 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use tokio_util::io::ReaderStream;
 
-use crate::app_state::{SessionHistory, SettingsState};
-use crate::database::ClipboardEntry;
+use crate::app_state::SettingsState;
 use crate::database::DbState;
-use crate::infrastructure::repository::clipboard_repo::ClipboardRepository;
 use crate::infrastructure::repository::settings_repo::SettingsRepository;
 
 use super::models::*;
 use super::utils::*;
 use super::web_ui::render_index;
-use super::{append_message, register_received_file};
+use super::register_received_file;
 
 pub async fn index(State(state): State<Arc<AppState>>) -> Html<String> {
     let app_handle = &state.app_handle;
@@ -188,117 +184,9 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     }
 }
 
-pub async fn handle_text(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<ReceiveText>,
-) -> axum::response::Response {
-    let db_state = state.app_handle.state::<DbState>();
-    update_activity(&state.app_handle);
-
-    let sender_id = if payload.sender_id.is_empty() {
-        "mobile"
-    } else {
-        &payload.sender_id
-    };
-    let sender_name = if payload.sender_name.is_empty() {
-        "手机"
-    } else {
-        &payload.sender_name
-    };
-
-    append_message(
-        &state.app_handle,
-        "in",
-        "text",
-        &payload.content,
-        sender_id,
-        sender_name,
-        None,
-    );
-
-    let settings = state.app_handle.state::<SettingsState>();
-    let session_hist = state.app_handle.state::<SessionHistory>();
-
-    let mut preview = payload.content.clone();
-    if preview.chars().count() > 100 {
-        preview = preview.chars().take(100).collect();
-        preview.push_str("...");
-    }
-
-    let mut id_result = Ok(0);
-
-    if settings.auto_copy_file.load(Ordering::Relaxed) {
-        id_result = if settings.persistent.load(Ordering::Relaxed) {
-            let entry = ClipboardEntry {
-                id: 0,
-                content_type: "text".to_string(),
-                content: payload.content.clone(),
-                html_content: None,
-                source_app: sender_name.to_string(),
-                source_app_path: None,
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64,
-                preview: preview.clone(),
-                is_pinned: false,
-                tags: Vec::new(),
-                use_count: 0,
-                is_external: false,
-                pinned_order: 0,
-                file_preview_exists: true,
-            };
-            db_state.repo.save(&entry, None).map_err(|e| {
-                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e,
-                )))
-            })
-        } else {
-            let id = -(SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_micros() as i64
-                / 1000);
-            let entry = ClipboardEntry {
-                id,
-                content_type: "text".to_string(),
-                content: payload.content.clone(),
-                html_content: None,
-                source_app: "File Transfer".to_string(),
-                source_app_path: None,
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64,
-                preview: preview.clone(),
-                is_pinned: false,
-                tags: Vec::new(),
-                use_count: 0,
-                is_external: false,
-                pinned_order: 0,
-                file_preview_exists: true,
-            };
-
-            if let Ok(mut session) = session_hist.0.lock() {
-                session.push_back(entry);
-                if session.len() > 500 {
-                    if let Some(removed) = session.pop_front() {
-                        let _ = state.app_handle.emit("clipboard-removed", removed.id);
-                    }
-                }
-            }
-            Ok(id)
-        };
-    }
-
-    if let Ok(id) = id_result {
-        if id != 0 {
-            let _ = state.app_handle.emit("clipboard-changed", id);
-            return (StatusCode::OK, "Text received").into_response();
-        }
-    }
-    (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save text").into_response()
+pub async fn handle_text() -> axum::response::Response {
+    // Do not leave an alternative pre-ACK text path in the file service.
+    (StatusCode::GONE, "Text sending moved to the durable TIEZ Plus MQTT page; files still use this service").into_response()
 }
 
 pub async fn upload(
@@ -330,6 +218,7 @@ pub async fn upload(
 
         if name == "file" {
             let file_name = field.file_name().unwrap_or("unknown.txt").to_string();
+            if !super::security::valid_filename(&file_name) { return (StatusCode::BAD_REQUEST,"Invalid filename").into_response(); }
             let content_type = field
                 .content_type()
                 .unwrap_or("application/octet-stream")
@@ -351,14 +240,15 @@ pub async fn upload(
 
             let target_path = save_dir.join(format!(
                 "{}_{}",
-                chrono::Utc::now().format("%Y%m%d%H%M%S"),
+                uuid::Uuid::new_v4(),
                 file_name
             ));
 
             if let Ok(mut file) = File::create(&target_path).await {
                 let mut stream = field;
                 let mut write_success = true;
-                while let Some(Ok(chunk)) = stream.next().await {
+                while let Some(result) = stream.next().await {
+                    let Ok(chunk) = result else { write_success = false; break; };
                     if let Err(e) = file.write_all(&chunk).await {
                         eprintln!("Error writing: {}", e);
                         write_success = false;
@@ -424,82 +314,59 @@ pub async fn upload_chunk(
         None => return (StatusCode::BAD_REQUEST, "Missing data").into_response(),
     };
 
-    let sessions = state.app_handle.state::<UploadSessions>();
-    let temp_path = {
-        let mut sessions_map = sessions.0.lock().unwrap();
-        sessions_map
-            .entry(meta.upload_id.clone())
-            .or_insert_with(|| {
-                let mut path = state
-                    .app_handle
-                    .path()
-                    .download_dir()
-                    .unwrap_or_else(|_| std::env::temp_dir());
-                if let Ok(Some(custom)) = state
-                    .app_handle
-                    .state::<DbState>()
-                    .settings_repo
-                    .get("file_transfer_path")
-                {
-                    if !custom.trim().is_empty() {
-                        path = std::path::PathBuf::from(custom);
-                    }
-                }
-                if !path.exists() {
-                    let _ = std::fs::create_dir_all(&path);
-                }
-                path.join(format!(".tmp_{}", meta.upload_id))
-            })
-            .clone()
+    receive_chunk(state, meta, data).await
+}
+#[derive(serde::Deserialize)]
+pub struct Base64Chunk { metadata: ChunkMetadata, data_base64: String }
+pub async fn upload_chunk_base64(State(state): State<Arc<AppState>>, Json(payload): Json<Base64Chunk>) -> axum::response::Response {
+    use base64::Engine;
+    let Ok(data) = base64::engine::general_purpose::STANDARD.decode(&payload.data_base64) else {
+        return (StatusCode::BAD_REQUEST,"Invalid base64").into_response();
     };
-
-    let mut options = tokio::fs::OpenOptions::new();
-    options.create(true).append(true).write(true);
-
-    if let Ok(mut file) = options.open(&temp_path).await {
-        if let Err(e) = file.write_all(&data).await {
-            eprintln!("Error writing chunk: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Write failed").into_response();
-        }
-    } else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Open failed").into_response();
+    receive_chunk(state,payload.metadata,data).await
+}
+async fn receive_chunk(state: Arc<AppState>, meta: ChunkMetadata, data: Vec<u8>) -> axum::response::Response {
+    if !super::security::valid_upload_id(&meta.upload_id) || !super::security::valid_filename(&meta.file_name)
+        || meta.total_chunks == 0 || meta.total_chunks > 16384 || meta.chunk_index >= meta.total_chunks
+        || meta.total_size > 2 * 1024 * 1024 * 1024 || data.len() > 8 * 1024 * 1024 {
+        return (StatusCode::BAD_REQUEST,"Invalid chunk metadata or size").into_response();
     }
-
-    if meta.chunk_index == meta.total_chunks - 1 {
-        let final_filename = format!(
-            "{}_{}",
-            chrono::Utc::now().format("%Y%m%d%H%M%S"),
-            meta.file_name
-        );
-        let final_path = temp_path.parent().unwrap().join(&final_filename);
-
-        if let Err(e) = tokio::fs::rename(&temp_path, &final_path).await {
-            eprintln!("Error finalizing file: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Finalize failed").into_response();
+    let sessions = state.app_handle.state::<UploadSessions>();
+    let mut map = sessions.0.lock().await;
+    if !map.contains_key(&meta.upload_id) {
+        if meta.chunk_index != 0 || map.len() >= 16 { return (StatusCode::CONFLICT,"Upload session missing or full").into_response(); }
+        let mut dir = state.app_handle.path().download_dir().unwrap_or_else(|_|std::env::temp_dir());
+        if let Ok(Some(custom)) = state.app_handle.state::<DbState>().settings_repo.get("file_transfer_path") {
+            if !custom.trim().is_empty() { dir = custom.into(); }
         }
-
-        {
-            let mut sessions_map = sessions.0.lock().unwrap();
-            sessions_map.remove(&meta.upload_id);
+        if tokio::fs::create_dir_all(&dir).await.is_err() { return (StatusCode::INTERNAL_SERVER_ERROR,"Destination unavailable").into_response(); }
+        let path = dir.join(format!(".tiezplus_{}.part",uuid::Uuid::new_v4()));
+        if tokio::fs::OpenOptions::new().write(true).create_new(true).open(&path).await.is_err() {
+            return (StatusCode::INTERNAL_SERVER_ERROR,"Unable to create upload").into_response();
         }
-
-        let content_type = meta
-            .content_type
-            .unwrap_or_else(|| "application/octet-stream".to_string());
-        register_received_file(
-            &state.app_handle,
-            final_path,
-            meta.file_name,
-            content_type,
-            meta.sender_id,
-            meta.sender_name,
-        )
-        .await;
-
-        return (StatusCode::OK, "Upload complete").into_response();
+        map.insert(meta.upload_id.clone(),UploadSession{path,next_chunk:0,total_chunks:meta.total_chunks,total_size:meta.total_size,received:0,filename:meta.file_name.clone()});
     }
-
-    (StatusCode::OK, "Chunk received").into_response()
+    let session = map.get_mut(&meta.upload_id).unwrap();
+    if session.next_chunk != meta.chunk_index || session.total_chunks != meta.total_chunks || session.total_size != meta.total_size
+        || session.filename != meta.file_name || session.received + data.len() as u64 > session.total_size {
+        return (StatusCode::CONFLICT,"Out-of-order or inconsistent chunk; restart upload").into_response();
+    }
+    let final_chunk = meta.chunk_index + 1 == meta.total_chunks;
+    if final_chunk && session.received + data.len() as u64 != session.total_size {
+        return (StatusCode::BAD_REQUEST,"Incomplete upload").into_response();
+    }
+    let write_result = async {
+        let mut file = tokio::fs::OpenOptions::new().append(true).open(&session.path).await?;
+        file.write_all(&data).await?; file.sync_data().await
+    }.await;
+    if write_result.is_err() { return (StatusCode::INTERNAL_SERVER_ERROR,"Chunk write failed; restart upload").into_response(); }
+    session.received += data.len() as u64; session.next_chunk += 1;
+    if !final_chunk { return (StatusCode::OK,"Chunk received").into_response(); }
+    let final_path = session.path.parent().unwrap().join(format!("{}_{}",uuid::Uuid::new_v4(),meta.file_name));
+    if tokio::fs::rename(&session.path,&final_path).await.is_err() { return (StatusCode::INTERNAL_SERVER_ERROR,"Finalize failed").into_response(); }
+    map.remove(&meta.upload_id); drop(map);
+    register_received_file(&state.app_handle,final_path,meta.file_name,meta.content_type.unwrap_or_else(||"application/octet-stream".into()),meta.sender_id,meta.sender_name).await;
+    (StatusCode::OK,"Upload complete").into_response()
 }
 
 pub async fn handle_file_download_proxy(

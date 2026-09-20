@@ -38,6 +38,13 @@ const FileTransferChatView = ({
         return { controlHeight, footerPaddingY };
     };
 
+    const [sessionUrl, setSessionUrl] = useState('');
+    useEffect(() => { let active = true; invoke<string>('get_file_server_session_url').then(url => { if(active) setSessionUrl(url); }).catch(() => { if(active) setSessionUrl(''); }); return () => {active = false;}; },[localIp,actualPort]);
+    const transferUrl = (path: string) => {
+        const url = new URL(path,`http://${localIp}:${actualPort}`);
+        if(sessionUrl && url.origin === `http://${localIp}:${actualPort}`) url.searchParams.set('auth',new URL(sessionUrl).searchParams.get('auth') || '');
+        return url.toString();
+    };
     const rootRef = useRef<HTMLDivElement>(null);
     const [composerMetrics, setComposerMetrics] = useState(() => resolveComposerMetrics());
     const composerMinHeight = composerMetrics.controlHeight;
@@ -530,7 +537,7 @@ const FileTransferChatView = ({
                 <div className="wt-header">
                     <div className="wt-info-panel">
                         <div className="wt-qr-container">
-                            <QRCodeCanvas value={`http://${localIp}:${actualPort}`} size={64} />
+                            <QRCodeCanvas value={sessionUrl || "File transfer is starting"} size={64} />
                         </div>
                         <div className="wt-info-list" style={{ flex: 1 }}>
                             <div className="wt-info-row">
@@ -607,7 +614,7 @@ const FileTransferChatView = ({
                                             src={
                                                 m.content.startsWith('data:') ? m.content :
                                                     m.file_path ? convertFileSrc(m.file_path) :
-                                                        m.content.startsWith('/download/') ? (localIp && actualPort ? `http://${localIp}:${actualPort}${m.content}` : m.content) :
+                                                        m.content.startsWith('/download/') ? (localIp && actualPort ? transferUrl(m.content) : m.content) :
                                                             convertFileSrc(m.content)
                                             }
                                             className="wt-img-preview"
@@ -663,7 +670,7 @@ const FileTransferChatView = ({
                                         <video
                                             src={
                                                 m.file_path ? convertFileSrc(m.file_path) :
-                                                    m.content.startsWith('/download/') ? (localIp && actualPort ? `http://${localIp}:${actualPort}${m.content}` : m.content) :
+                                                    m.content.startsWith('/download/') ? (localIp && actualPort ? transferUrl(m.content) : m.content) :
                                                         convertFileSrc(m.content)
                                             }
                                             className="wt-video-preview"

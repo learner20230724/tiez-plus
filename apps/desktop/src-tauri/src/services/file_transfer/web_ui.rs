@@ -720,7 +720,7 @@ pub fn render_index(theme: &str, color_mode: &str, logo_base64: &str) -> String 
             <span>FULL SCREEN EDIT</span>
             <span onclick="closeFullscreen()" style="cursor:pointer; padding:4px;">✕</span>
         </div>
-        <textarea id="fs-textarea" placeholder="输入内容..."></textarea>
+        <textarea id="fs-textarea" readonly placeholder="文字请使用 TIEZ Plus 手机应用可靠发送"></textarea>
         <div class="fs-toolbar">
             <button class="retro-btn" onclick="closeFullscreen()">CANCEL</button>
             <button class="retro-btn send-btn" onclick="sendFullscreen()">SEND</button>
@@ -730,7 +730,7 @@ pub fn render_index(theme: &str, color_mode: &str, logo_base64: &str) -> String 
     <footer>
         <label for="file-input" class="retro-btn add-btn">+</label>
         <div style="position:relative; flex:1; display:flex;">
-            <textarea class="text-input" id="text-input" placeholder="输入文字..." rows="1"></textarea>
+            <textarea class="text-input" id="text-input" readonly placeholder="文字请使用 TIEZ Plus 手机应用可靠发送" rows="1"></textarea>
             <div class="expand-btn" id="expand-btn" onclick="openFullscreen()">⤢</div>
         </div>
         <button class="retro-btn send-btn" id="send-btn">SEND</button>
@@ -845,7 +845,7 @@ pub fn render_index(theme: &str, color_mode: &str, logo_base64: &str) -> String 
             if (msgType === 'image' || (content.match(/\.(jpg|jpeg|png|gif|webp)$/i) && file_path)) {{
                 const useContent = content.startsWith('data:') || content.startsWith('/download/') || content.startsWith('http');
                 const src = escapeHTML(useContent ? content : (file_path || content));
-                bubbleContent = `<img src="${{src}}" class="img-preview" onclick="openOverlay('${{src}}')">`;
+                bubbleContent = `<img src="${{src}}" class="img-preview">`;
             }} else if (msgType === 'video') {{
                 const useContent = content.startsWith('/download/') || content.startsWith('http');
                 const src = escapeHTML(useContent ? content : (file_path || content));
@@ -881,6 +881,8 @@ pub fn render_index(theme: &str, color_mode: &str, logo_base64: &str) -> String 
                 </div>
             `;
             
+            const image = div.querySelector('img.img-preview');
+            if (image) image.addEventListener('click', () => openOverlay(image.src));
             const downloadUrl = content.startsWith('/download/') ? content : file_path;
             if (downloadUrl && msgType !== 'image' && msgType !== 'video') {{
                 div.querySelector('.bubble').style.cursor = 'pointer';
@@ -977,22 +979,7 @@ pub fn render_index(theme: &str, color_mode: &str, logo_base64: &str) -> String 
         }}
         connectWS();
 
-        sendBtn.onclick = async () => {{
-            const text = textInput.value.trim();
-            if (!text || isUploading) return;
-            
-            textInput.value = '';
-            textInput.style.height = '40px';
-            document.getElementById('expand-btn').style.display = 'none';
-
-            try {{
-                await fetch('/send-text', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ content: text, sender_id: deviceId, sender_name: deviceName }})
-                }});
-            }} catch(e) {{ alert('Send failed'); }}
-        }};
+        sendBtn.onclick = () => {{ alert('文字发送已迁移到 TIEZ Plus 手机应用的同步页；文件传输仍在此页使用。'); }};
 
         fileInput.onchange = async () => {{
             if (!fileInput.files.length || isUploading) return;

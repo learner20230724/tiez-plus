@@ -6,6 +6,7 @@ use tauri::AppHandle;
 use tokio::sync::broadcast;
 
 pub struct AppState {
+    pub access_token: String,
     pub app_handle: AppHandle,
     pub ws_tx: broadcast::Sender<String>,
 }
@@ -72,11 +73,15 @@ pub struct ChunkMetadata {
     pub content_type: Option<String>,
 }
 
-pub struct UploadSessions(pub Mutex<HashMap<String, std::path::PathBuf>>);
+pub struct UploadSession {
+    pub path: std::path::PathBuf, pub next_chunk: usize, pub total_chunks: usize,
+    pub total_size: u64, pub received: u64, pub filename: String,
+}
+pub struct UploadSessions(pub tokio::sync::Mutex<HashMap<String, UploadSession>>);
 
 impl Default for UploadSessions {
     fn default() -> Self {
-        Self(Mutex::new(HashMap::new()))
+        Self(tokio::sync::Mutex::new(HashMap::new()))
     }
 }
 

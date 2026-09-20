@@ -2,6 +2,7 @@ pub mod handlers;
 pub mod models;
 pub mod utils;
 pub mod web_ui;
+pub mod security;
 
 use axum::{
     extract::DefaultBodyLimit,
@@ -24,6 +25,7 @@ use crate::infrastructure::repository::settings_repo::SettingsRepository;
 pub use models::*;
 pub use utils::*;
 
+static SESSION_TOKEN: Mutex<String> = Mutex::new(String::new());
 pub static SERVER_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 #[tauri::command]
@@ -221,7 +223,7 @@ pub async fn toggle_file_server(
                 return Ok("Server already running".to_string());
             }
         }
-        let target_port = port.unwrap_or(12345);
+        let target_port = port.unwrap_or(18085);
         let (listener, actual_port) = bind_listener(target_port).await;
         if actual_port == 0 {
             return Err("Failed to bind any port".to_string());
@@ -233,6 +235,7 @@ pub async fn toggle_file_server(
             let mut ip_guard = server_info.ip.lock().unwrap();
             *ip_guard = actual_ip.clone();
         }
+        *SESSION_TOKEN.lock().unwrap() = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
         let app_handle_clone = app_handle.clone();
         let h = tokio::spawn(async move {
             run_server(listener, app_handle_clone).await;
@@ -295,6 +298,7 @@ pub async fn run_server(listener: tokio::net::TcpListener, app_handle: AppHandle
         };
     }
     let state = Arc::new(AppState {
+        access_token: SESSION_TOKEN.lock().unwrap().clone(),
         app_handle: app_handle.clone(),
         ws_tx: ws_tx.clone(),
     });
@@ -304,6 +308,7 @@ pub async fn run_server(listener: tokio::net::TcpListener, app_handle: AppHandle
         .route("/poll", get(handlers::poll_messages))
         .route("/upload", post(handlers::upload))
         .route("/upload_chunk", post(handlers::upload_chunk))
+        .route("/upload-chunk-base64", post(handlers::upload_chunk_base64))
         .route("/upload-chunk", post(handlers::upload_chunk))
         .route("/send_text", post(handlers::handle_text))
         .route("/send-text", post(handlers::handle_text))
@@ -311,8 +316,9 @@ pub async fn run_server(listener: tokio::net::TcpListener, app_handle: AppHandle
             "/download/{token}",
             get(handlers::handle_file_download_proxy),
         )
+        .route_layer(axum::middleware::from_fn_with_state(state.access_token.clone(), security::require_session))
         .with_state(state)
-        .layer(DefaultBodyLimit::disable());
+        .layer(DefaultBodyLimit::max(16 * 1024 * 1024));
 
     if let Err(e) = axum::serve(listener, app).await {
         eprintln!("Server error: {}", e);
@@ -514,4 +520,13 @@ pub fn get_file_server_status(app_handle: AppHandle) -> StatusPayload {
 #[tauri::command]
 pub fn get_app_logo(app_handle: AppHandle) -> String {
     get_app_logo_base64(&app_handle)
+}
+
+#[tauri::command]
+pub fn get_file_server_session_url(app_handle: AppHandle) -> Result<String,String> {
+    let info = app_handle.state::<ServerInfo>();
+    let port = info.port.load(Ordering::Relaxed);
+    let token = SESSION_TOKEN.lock().map_err(|_| "Session unavailable")?;
+    if port == 0 || token.is_empty() { return Err("File transfer is not running".into()); }
+    Ok(format!("http://{}:{port}/?auth={token}",get_local_ip_addr(app_handle.clone())))
 }
