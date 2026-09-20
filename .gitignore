@@ -21,3 +21,5 @@ artifacts/*
 *.keystore
 
 broker-runtime/
+.playwright-cli/
+output/playwright/

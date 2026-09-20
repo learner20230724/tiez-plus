@@ -1,194 +1,173 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, KeyboardAvoidingView, Platform } from 'react-native';
+import { Alert, AppState, Keyboard, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
-import { runtime, init, subscribe, startDiscovery, stopDiscovery, connect, inspectEndpoint, sendDrafts, sendRecord, uuid } from './runtime';
-import type { Draft, Outbox, OutboxSummary } from './store';
-import type { Endpoint } from './transport';
-import { mergeDrafts, draftSnapshotMatches, readComputer, readEntry, copyText } from './actions';
-import { fetchWebDavEntries, loadMobileSyncSettings, type SyncedEntry } from '../lib/sync';
-const copy = (text: string) => copyText(text, Clipboard.setStringAsync);
-
-type RemoteEntry = { id: string; preview: string; timestamp: number; content_type: string };
-type PullCache = { instanceId: string; name: string; at: number; current: { content?: string; error?: string; ok: boolean }; entries: RemoteEntry[]; note?: string };
-const stateName: Record<string, string> = { saved: '已保存，待手动发送', sending: '等待电脑确认', unconfirmed: '未确认送达', delivered: '已送达', stored: '电脑已保存', copy_failed: '电脑已保存，剪贴板写入失败', unknown: '结果待确认', rejected: '未送达' };
+import { useTheme } from '../theme/ThemeContext';
+import { useHaptics } from '../context/HapticContext';
+import { runtime, init, subscribe, sendDrafts, uuid } from './runtime';
+import type { Draft, OutboxSummary } from './store';
+import { mergeDrafts, draftSnapshotMatches, clearArchivedDrafts, readComputer, readEntry, copyText } from './actions';
+import HomeView, { type Detail, type PullCache, type RemoteEntry } from './HomeView';
 
 export default function PlusHome() {
-  const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
-  const [, tick] = useState(0);
-  const [page, setPage] = useState<'send'|'pull'|'history'>('send');
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const draftsRef = useRef<Draft[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [history, setHistory] = useState<OutboxSummary[]>([]);
-  const [search, setSearch] = useState('');
-  const searchRef = useRef('');
-  const historyOffset = useRef(0);
-  const [saved, setSaved] = useState('');
-  const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
-  const [pull, setPull] = useState<PullCache | null>(null);
-  const [pullError, setPullError] = useState('');
-  const [webdav, setWebdav] = useState<SyncedEntry[]>([]);
-  const [detail, setDetail] = useState<{title: string; content: string; record?: Outbox} | null>(null);
-  const [qr, setQr] = useState(false);
-  const qrGuard = useRef(false);
-  const [permission, askPermission] = useCameraPermissions();
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const updateDrafts = (next: Draft[]) => { draftsRef.current = next; setDrafts(next); };
-  const showError = (e: unknown) => Alert.alert('内容已保留', e instanceof Error ? e.message : String(e));
-  async function reload() {
-    if (!runtime.store) return;
-    const persisted = await runtime.store.drafts();
-    updateDrafts(mergeDrafts(persisted, draftsRef.current));
-    await loadHistory();
+  const {colors}=useTheme(); const {triggerHaptic}=useHaptics();
+  const insets=useSafeAreaInsets(); const navigation=useNavigation();
+  const [mode,setMode]=useState<'push'|'pull'>('push');
+  const [drafts,setDrafts]=useState<Draft[]>([]); const draftsRef=useRef<Draft[]>([]);
+  const [selected,setSelected]=useState<string[]>([]); const [loading,setLoading]=useState(true);
+  const [saveLabel,setSaveLabel]=useState(''); const [feedback,setFeedback]=useState('');
+  const feedbackTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const saveTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const [keyboard,setKeyboard]=useState(false);
+  const [pushing,setPushing]=useState(false); const pushingRef=useRef(false);
+  const [refreshing,setRefreshing]=useState(false); const refreshingRef=useRef(false);
+  const [pull,setPull]=useState<PullCache|null>(null); const [pullError,setPullError]=useState('');
+  const [historyOpen,setHistoryOpen]=useState(false); const [history,setHistory]=useState<OutboxSummary[]>([]);
+  const [search,setSearch]=useState(''); const searchRef=useRef(''); const [historyPage,setHistoryPage]=useState(0); const pageRef=useRef(0);
+  const [detail,setDetail]=useState<Detail|null>(null);
+  const captureBusy=useRef(false);
+  const showError=(error:unknown)=>Alert.alert('操作未完成',error instanceof Error?error.message:String(error));
+  const toast=(message:string)=>{clearTimeout(feedbackTimer.current);setFeedback(message);feedbackTimer.current=setTimeout(()=>setFeedback(''),2200);};
+  function withInput(next:Draft[]) {
+    return next.some(d=>(!d.kind||d.kind==='input')&&!d.content.length)?next:[...next,{id:uuid(),content:'',revision:1,updated_at:Date.now(),kind:'input' as const}];
   }
+  function update(next:Draft[]) { const rows=withInput(next);draftsRef.current=rows;setDrafts(rows); }
   async function loadHistory() {
-    if (!runtime.store) return;
-    const query=searchRef.current, offset=historyOffset.current;
-    const rows=await runtime.store.listHistory(query,offset);
-    if(query===searchRef.current && offset===historyOffset.current) setHistory(rows);
+    if(!runtime.store)return;
+    const query=searchRef.current,page=pageRef.current;
+    const rows=await runtime.store.listHistory(query,page*100);
+    if(query===searchRef.current&&page===pageRef.current)setHistory(rows);
+  }
+  async function reload() {
+    if(!runtime.store)return;
+    const persisted=await runtime.store.drafts();
+    const local=draftsRef.current,merged=mergeDrafts(persisted,local);
+    const byId=new Map(merged.map(d=>[d.id,d]));
+    // Database timestamps must not shuffle the editor while the user is typing.
+    const order=[...local.map(d=>d.id),...merged.filter(d=>!local.some(l=>l.id===d.id)).map(d=>d.id)];
+    update(order.map(id=>byId.get(id)!).filter(Boolean));
+    await loadHistory();
   }
   async function flush() {
     clearTimeout(saveTimer.current);
-    if (!runtime.store) throw new Error('本地数据库尚未就绪，文字未发送');
-    const snapshot = draftsRef.current.map(d => ({...d}));
-    for (const d of snapshot) await runtime.store.saveDraft(d);
-    if (draftSnapshotMatches(snapshot, draftsRef.current)) setSaved('已保存到手机');
+    if(!runtime.store)throw new Error('本地保存尚未就绪，输入内容未清除');
+    const snapshot=draftsRef.current.map(d=>({...d}));
+    for(const d of snapshot)await runtime.store.saveDraft(d);
+    if(draftSnapshotMatches(snapshot,draftsRef.current))setSaveLabel('已保存');
   }
-  async function addDraft(content = '') {
-    const d = { id: uuid(), content, revision: 1, updated_at: Date.now() };
-    updateDrafts([...draftsRef.current, d]); setSelected(ids => [...ids, d.id]); setPage('send'); setSaved('保存中…');
-    try { await flush(); } catch { setSaved('保存失败，勿退出应用'); }
+  function edit(id:string,content:string) {
+    update(draftsRef.current.map(d=>d.id===id?{...d,content,revision:d.revision+1,updated_at:Date.now(),kind:'input',source_outbox_id:null}:d));
+    setSelected(ids=>content.length?[...new Set([...ids,id])]:ids.filter(x=>x!==id));
+    setSaveLabel('保存中…');clearTimeout(saveTimer.current);
+    saveTimer.current=setTimeout(()=>{void flush().catch(()=>setSaveLabel('保存失败，请勿退出'));},250);
   }
-  function edit(id: string, content: string) {
-    updateDrafts(draftsRef.current.map(d => d.id === id ? { ...d, content, revision: d.revision + 1, updated_at: Date.now() } : d));
-    setSaved('保存中…'); clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { void flush().catch(() => setSaved('保存失败，勿退出应用；发送已禁用直到保存成功')); }, 250);
+  async function captureClipboard() {
+    if(captureBusy.current)return; captureBusy.current=true;
+    try {
+      await init();
+      const content=await Clipboard.getStringAsync(); // Preserve the exact full text; preview truncation is visual only.
+      const item=await runtime.store!.captureClipboard(content);
+      await reload();
+      setSelected(ids=>content.length?[...new Set([...ids,item.id])]:ids.filter(id=>id!==item.id));
+    } finally {captureBusy.current=false;}
   }
-  async function perform(fn: () => Promise<void>) {
-    if (busyRef.current) return; busyRef.current = true; setBusy(true);
-    try { await flush(); await fn(); } catch (error) { showError(error); }
-    finally { await reload().catch(() => {}); busyRef.current = false; setBusy(false); }
+  async function push() {
+    if(pushingRef.current)return;
+    const chosen=draftsRef.current.filter(d=>selected.includes(d.id)&&d.content.length>0).map(d=>({...d}));
+    if(!chosen.length){toast('请选择内容');return;}
+    pushingRef.current=true;setPushing(true);
+    try {
+      await flush();
+      await sendDrafts(chosen,()=>{
+        // The history transaction has committed. Never clear unsaved or newer edits.
+        const archived=clearArchivedDrafts(draftsRef.current,chosen);
+        update(archived.drafts);setSelected(ids=>ids.filter(id=>!archived.deselect.includes(id)));
+        toast('已存入历史');
+      });
+      triggerHaptic('success');toast('已送达');
+    } catch(error) {showError(error);}
+    finally {pushingRef.current=false;setPushing(false);await reload().catch(()=>{});}
   }
   async function pullNow() {
-    setPage('pull'); setPullError('');
-    const c = runtime.connection;
-    if (!c?.connected) { setPullError('本次拉取失败，下方为旧缓存'); throw new Error('电脑未连接；上次拉取结果仍保留'); }
+    if(refreshingRef.current)return; refreshingRef.current=true;setRefreshing(true);setPullError('');
     try {
-      const result = await readComputer(c);
-      const cache: PullCache = { instanceId: c.endpoint.instanceId, name: c.endpoint.name, at: Date.now(), ...result };
-      await runtime.store!.cache('pull', cache); setPull(cache);
-    } catch (e) { setPullError('本次拉取失败，下方为旧缓存'); throw e; }
+      const connection=runtime.connection;
+      if(!connection?.connected)throw new Error('电脑未连接，请到设置查看连接');
+      const result=await readComputer(connection);
+      const cache:PullCache={instanceId:connection.endpoint.instanceId,name:connection.endpoint.name,at:Date.now(),...result};
+      await runtime.store!.cache('pull',cache);setPull(cache);
+    } catch(error) {setPullError((error instanceof Error?error.message:String(error))+'；保留上次记录');}
+    finally {refreshingRef.current=false;setRefreshing(false);}
   }
-  async function showRemote(entry: RemoteEntry, copy = false) {
-    const c = runtime.connection;
-    if (!c?.connected || c.endpoint.instanceId !== pull?.instanceId) throw new Error('原电脑未连接，不能获取完整正文');
-    const content = await readEntry(c, entry.id);
-    if (copy) { await copyText(content, Clipboard.setStringAsync); Alert.alert('已复制', '完整正文已复制到手机剪贴板'); }
-    else setDetail({ title: '电脑记录全文', content });
+  async function refresh() {
+    if(mode==='pull'){await pullNow();return;}
+    if(refreshingRef.current)return;refreshingRef.current=true;setRefreshing(true);
+    try {await flush();await captureClipboard();}catch(error){showError(error);}
+    finally {refreshingRef.current=false;setRefreshing(false);}
   }
-  useEffect(() => {
-    let alive = true;
-    void init().then(async () => {
-      await reload(); if (!draftsRef.current.length) await addDraft();
-      const cache = await runtime.store!.readCache<PullCache>('pull'); if (alive) setPull(cache);
-      await startDiscovery();
-    }).catch(error => { setSaved('本地存储初始化失败，请勿退出或发送'); showError(error); });
-    const off = subscribe(() => { if (alive) { tick(v => v + 1); void reload().catch(() => {}); } });
-    const app = AppState.addEventListener('change', state => {
-      if (state === 'active') { void startDiscovery().catch(showError); void reload().catch(showError); }
-      else { void flush().catch(() => {}); stopDiscovery(); }
+  async function copy(content:string) {await copyText(content,Clipboard.setStringAsync);triggerHaptic('success');toast('已复制');}
+  async function remoteContent(entry:RemoteEntry) {
+    const connection=runtime.connection;
+    if(!connection?.connected||connection.endpoint.instanceId!==pull?.instanceId)throw new Error('原电脑未连接，无法获取全文');
+    return readEntry(connection,entry.id);
+  }
+  async function queueHistory(id:string) {
+    const draft=await runtime.store!.queueHistory(id);
+    await reload();setSelected(ids=>[...new Set([...ids,draft.id])]);setHistoryOpen(false);setDetail(null);setMode('push');toast('已加入待推送');
+  }
+  async function viewHistory(id:string) {
+    const record=await runtime.store!.getRecord(id);
+    if(!record)throw new Error('记录已删除');
+    setHistoryOpen(false);setDetail({title:'历史全文',content:record.content,record});
+  }
+  async function editDetail() {
+    if(!detail)return;
+    const draft:Draft=detail.draft?{...detail.draft,kind:'input',source_outbox_id:null,revision:detail.draft.revision+1,updated_at:Date.now()}:{id:uuid(),kind:'input',content:detail.content,revision:1,updated_at:Date.now()};
+    // Save before dismissing a full-text view. A modified retry creates a new message.
+    await runtime.store!.saveDraft(draft);await reload();setSelected(ids=>[...new Set([...ids,draft.id])]);setDetail(null);setMode('push');
+  }
+  function deleteDetail() {
+    const id=detail?.record?.id;if(!id)return;
+    Alert.alert('删除记录？','删除后无法从历史恢复。',[{text:'取消',style:'cancel'},{text:'删除',style:'destructive',onPress:()=>{void runtime.store!.remove(id).then(()=>{setDetail(null);return loadHistory();}).catch(showError);}}]);
+  }
+  const run=(action:()=>Promise<unknown>)=>{void action().catch(showError);};
+  useEffect(()=>{
+    let alive=true;
+    const boot=init().then(async()=>{
+      await reload();
+      setSelected(draftsRef.current.filter(d=>d.content.length>0).map(d=>d.id));
+      const cached=await runtime.store!.readCache<PullCache>('pull');if(alive)setPull(cached);
+      await captureClipboard().catch(()=>toast('未能读取手机剪贴板，可下拉重试'));
+    }).catch(error=>{setSaveLabel('保存未就绪，请勿退出');showError(error);}).finally(()=>{if(alive)setLoading(false);});
+    const off=subscribe(()=>{if(alive)void reload().catch(()=>{});});
+    const app=AppState.addEventListener('change',state=>{
+      if(state==='active')void captureClipboard().catch(()=>toast('未能读取手机剪贴板'));
+      else void flush().catch(()=>setSaveLabel('保存失败，请勿退出'));
     });
-    const blur = navigation.addListener('blur', () => { void flush().catch(showError); });
-    const handleLink = async ({url}: {url: string}) => {
-      if (!url.startsWith('tiezplus://')) return;
-      await init();
-      if (url.includes('sync-pull')) { await perform(pullNow); }
-      else if (url.includes('sync-push') || url.includes('sync-now')) {
-        const text = await Clipboard.getStringAsync();
-        if (text.length) { await addDraft(text); Alert.alert('已保存为草稿', '检查内容后点“发送所选”；不会在后台自动发送。'); }
-      }
+    const blur=navigation.addListener('blur',()=>{void flush().catch(showError);});
+    const show=Keyboard.addListener(Platform.OS==='ios'?'keyboardWillShow':'keyboardDidShow',()=>setKeyboard(true));
+    const hide=Keyboard.addListener(Platform.OS==='ios'?'keyboardWillHide':'keyboardDidHide',()=>setKeyboard(false));
+    const handleLink=async({url}:{url:string})=>{
+      if(!url.startsWith('tiezplus://'))return;
+      await boot;
+      if(url.includes('sync-pull')) {setMode('pull');await pullNow();}
+      else if(url.includes('sync-push')||url.includes('sync-now')) {setMode('push');await captureClipboard();}
     };
-    const link = Linking.addEventListener('url', e => { void handleLink(e).catch(showError); });
-    void Linking.getInitialURL().then(url => { if (url) return handleLink({url}); }).catch(showError);
-    return () => { alive = false; off(); blur(); app.remove(); link.remove(); void flush().catch(() => {}); stopDiscovery(); };
-  }, []);
-  const Button = ({label, onPress, danger = false}: {label: string; onPress: () => void; danger?: boolean}) => <Pressable accessibilityRole="button" disabled={busy} onPress={onPress} style={[s.button, danger && s.danger, busy && {opacity: .5}]}><Text style={s.buttonText}>{label}</Text></Pressable>;
-  return <KeyboardAvoidingView style={[s.root, {paddingTop: insets.top}]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-    <ScrollView contentContainerStyle={{padding: 18, paddingBottom: 120}} keyboardShouldPersistTaps="handled">
-      <Text style={s.title}>TIEZ Plus</Text><Text style={s.subtitle}>先保存，再传递。每一段文字都有去处。</Text>
-      <View style={s.card}>
-        <Text style={s.strong}>{runtime.status}</Text><Text style={s.small}>服务：{runtime.connection?.connected ? '已连接' : '未连接'}　电脑：{runtime.ready ? '已就绪' : '未就绪'}</Text>
-        {!!runtime.error && <Text style={s.warning}>{runtime.error}</Text>}
-        <View style={s.row}><Button label="重新发现" onPress={() => { stopDiscovery(); void startDiscovery().catch(showError); }}/><Button label="扫码连接" onPress={() => { qrGuard.current = false; setQr(true); }}/></View>
-        {[...runtime.endpoints.values()].filter(e => Date.now() - e.seen < 45000).map(e => <Pressable key={e.instanceId} onPress={() => { void connect(e); }}><Text style={s.device}>{runtime.selected?.instanceId === e.instanceId ? '● ' : '○ '}{e.name} · {e.host}</Text></Pressable>)}
-        <Text style={s.small}>仅用于可信家庭局域网。断线后不自动补发。</Text>
-      </View>
-      <View style={s.row}>{(['send', 'pull', 'history'] as const).map((p, i) => <Pressable key={p} onPress={() => {void flush().catch(showError); setPage(p);}} style={[s.tab, page === p && s.activeTab]}><Text style={page === p ? s.activeText : s.strong}>{['发送', '拉取', '手机历史'][i]}</Text></Pressable>)}</View>
-      {page === 'send' && <>
-        <Text style={s.small}>{saved}</Text>
-        {drafts.map((d, index) => <View style={s.card} key={d.id}>
-          <Pressable onPress={() => setSelected(ids => ids.includes(d.id) ? ids.filter(id => id !== d.id) : [...ids, d.id])}><Text style={s.strong}>{selected.includes(d.id) ? '☑' : '☐'} 草稿 {index + 1}</Text></Pressable>
-          <TextInput accessibilityLabel={`草稿 ${index + 1}`} multiline value={d.content} onChangeText={text => edit(d.id, text)} placeholder="在这里写下文字，自动保存到手机…" placeholderTextColor="#738091" style={s.editor}/>
-          <Text style={s.small}>{d.content.length} 字符</Text>
-        </View>)}
-        <View style={s.row}><Button label="新增草稿" onPress={() => { void addDraft().catch(showError); }}/><Button label="读取手机剪贴板" onPress={() => { void Clipboard.getStringAsync().then(addDraft).catch(showError); }}/></View>
-        <Button label={busy ? '处理中…' : '发送所选，等待电脑确认'} onPress={() => { void perform(async () => {
-          const chosen = draftsRef.current.filter(d => selected.includes(d.id) && d.content.length > 0);
-          if (!chosen.length) throw new Error('请先选择有内容的草稿');
-          await sendDrafts(chosen); Alert.alert('已送达', '电脑已保存内容并完成剪贴板写入。');
-        }); }}/>
-      </>}
-      {page === 'pull' && <>
-        <Button label={busy ? '拉取中…' : '拉取电脑当前内容与最近 50 条'} onPress={() => { void perform(pullNow); }}/>
-        <Text style={s.small}>只展示，不自动复制。点击“复制”才改变手机剪贴板。</Text>
-        {!!pullError && <Text style={s.warning}>{pullError}</Text>}
-        {pull && <><Text style={s.small}>{pull.name} · 缓存于 {new Date(pull.at).toLocaleString()}{!runtime.ready ? ' · 离线/未就绪' : ''}</Text>
-          <View style={s.card}><Text style={s.strong}>电脑当前剪贴板（拉取时快照）</Text><Text selectable style={s.body}>{pull.current.content?.slice(0, 500) || pull.current.error || '没有文字'}</Text>
-            {typeof pull.current.content === 'string' && <View style={s.row}><Button label="全文" onPress={() => setDetail({title: '电脑当前内容', content: pull.current.content!})}/><Button label="复制" onPress={() => { void perform(async () => { await copy(pull.current.content!); Alert.alert('已复制'); }); }}/></View>}
-          </View>
-          {!!pull.note && <Text style={s.warning}>{pull.note}</Text>}
-          {pull.entries.map(e => <View style={s.card} key={e.id}><Text style={s.body}>{e.preview}</Text><Text style={s.small}>{new Date(e.timestamp).toLocaleString()}</Text><View style={s.row}><Button label="查看全文" onPress={() => { void perform(() => showRemote(e)); }}/><Button label="复制" onPress={() => { void perform(() => showRemote(e, true)); }}/></View></View>)}
-        </>}
-      </>}
-      {page === 'pull' && <View style={s.card}>
-        <Text style={s.small}>高级 · 原 WebDAV（独立操作，不作为 MQTT 失败回退；配置在设置页）</Text>
-        <Button label="手动读取 WebDAV 历史" onPress={() => { void perform(async () => { setWebdav(await fetchWebDavEntries(await loadMobileSyncSettings())); }); }}/>
-        {webdav.map(e => <Pressable key={e.id} onPress={() => setDetail({title: 'WebDAV 全文',content:e.content})}><Text style={s.body}>{e.preview || e.content.slice(0,200)}</Text></Pressable>)}
-      </View>}
-      {page === 'history'  && <>
-        <Text style={s.small}>已送达保留 90 天；失败、待确认和草稿不自动删除。</Text>
-        <TextInput style={s.search} placeholder="搜索手机历史正文" value={search} onChangeText={text => {setSearch(text); searchRef.current=text; historyOffset.current=0; void loadHistory().catch(showError);}}/>
-        {history.map(r => <Pressable key={r.id} style={s.card} onPress={() => { void perform(async () => { const full=await runtime.store!.getRecord(r.id); if(!full) throw new Error('记录已删除'); setDetail({title: '手机记录全文', content: full.content, record: full}); }); }}>
-          <Text style={[s.strong, {color: r.status === 'delivered' ? '#15754e' : '#9a5b12'}]}>{stateName[r.status] || r.status}</Text><Text style={s.body}>{r.preview}</Text><Text style={s.small}>{new Date(r.created_at).toLocaleString()} · {r.attempts} 次尝试</Text>{!!r.error && <Text style={s.warning}>{r.error}</Text>}
-        </Pressable>)}
-        <Text style={s.small}>第 {Math.floor(historyOffset.current/100)+1} 页 · 搜索匹配全文，不只搜索摘要</Text>
-        <View style={s.row}><Button label="上一页" onPress={() => {historyOffset.current=Math.max(0,historyOffset.current-100); void loadHistory().catch(showError);}}/>{history.length===100 && <Button label="下一页" onPress={() => {historyOffset.current+=100; void loadHistory().catch(showError);}}/>}</View>
-      </>}
-    </ScrollView>
-    <Modal visible={!!detail} animationType="slide" onRequestClose={() => setDetail(null)}><View style={[s.root, {paddingTop: insets.top + 14, padding: 18}]}>
-      <Text style={s.title}>{detail?.title}</Text><ScrollView style={{flex: 1}}><Text selectable style={s.full}>{detail?.content}</Text></ScrollView>
-      <View style={s.row}><Button label="关闭" onPress={() => setDetail(null)}/><Button label="复制全文" onPress={() => { void perform(async () => { await copy(detail!.content); Alert.alert('已复制'); }); }}/><Button label="编辑/再次发送" onPress={() => { const text = detail!.content; setDetail(null); void addDraft(text).catch(showError); }}/></View>
-      {detail?.record && <View style={s.row}>{detail.record.status !== 'delivered' && <Button label="原样重试" onPress={() => { const r = detail.record!; void perform(async () => { await sendRecord(r); setDetail(null); Alert.alert('已送达'); }); }}/>}<Button label="删除记录" danger onPress={() => Alert.alert('删除记录？', '删除后无法从本机历史恢复。', [{text: '取消', style: 'cancel'}, {text: '删除', style: 'destructive', onPress: () => { const id = detail.record!.id; void perform(async () => { await runtime.store!.remove(id); setDetail(null); }); }}])}/></View>}
-    </View></Modal>
-    <Modal visible={qr} onRequestClose={() => setQr(false)}><View style={[s.root, {paddingTop: insets.top + 12, padding: 18}]}><Text style={s.title}>扫描电脑上的 Plus 连接码</Text>
-      {!permission?.granted ? <Button label="允许相机" onPress={() => { void askPermission(); }}/> : <CameraView style={{flex: 1}} barcodeScannerSettings={{barcodeTypes: ['qr']}} onBarcodeScanned={({data}) => {
-        if (qrGuard.current) return; qrGuard.current = true;
-        void (async () => { const json = data.startsWith('tiezplus://connect?data=') ? decodeURIComponent(data.split('?data=')[1]) : data; const value = JSON.parse(json); if (value.product !== 'tiez-plus' || value.v !== 1) throw new Error('请扫描 TIEZ Plus 的连接码'); const found = await inspectEndpoint(value.host, value.httpPort); if (found) await connect(found); setQr(false); })().catch(e => { showError(e); qrGuard.current = false; });
-      }}/>}<Button label="取消" onPress={() => setQr(false)}/>
-    </View></Modal>
-  </KeyboardAvoidingView>;
+    const links=Linking.addEventListener('url',event=>{void handleLink(event).catch(showError);});
+    void Linking.getInitialURL().then(url=>url?handleLink({url}):undefined).catch(showError);
+    return ()=>{alive=false;off();blur();app.remove();show.remove();hide.remove();links.remove();clearTimeout(feedbackTimer.current);void flush().catch(()=>{});};
+  },[]);
+  return <HomeView colors={colors} top={insets.top} bottom={insets.bottom} keyboard={keyboard} loading={loading} mode={mode}
+    setMode={next=>{run(flush);setMode(next);if(next==='pull')void pullNow();}}
+    drafts={drafts} selected={selected} edit={edit} toggle={id=>setSelected(ids=>ids.includes(id)?ids.filter(x=>x!==id):[...ids,id])}
+    selectAll={()=>{const ids=draftsRef.current.filter(d=>d.content.length>0).map(d=>d.id);setSelected(old=>ids.every(id=>old.includes(id))?[]:ids);}}
+    push={()=>void push()} pushing={pushing} refreshing={refreshing} refresh={()=>void refresh()} saveLabel={saveLabel} feedback={feedback}
+    pull={pull} pullError={pullError} offline={!runtime.ready} copyCurrent={()=>{if(typeof pull?.current.content==='string')run(()=>copy(pull.current.content!));else toast(pull?.current.error||'没有文字');}}
+    copyRemote={entry=>run(async()=>copy(await remoteContent(entry)))} viewRemote={entry=>run(async()=>setDetail({title:'电脑记录全文',content:await remoteContent(entry)}))}
+    historyOpen={historyOpen} openHistory={()=>{run(flush);run(loadHistory);setHistoryOpen(true);}} closeHistory={()=>setHistoryOpen(false)} history={history} search={search}
+    searchHistory={query=>{setSearch(query);searchRef.current=query;pageRef.current=0;setHistoryPage(0);run(loadHistory);}} historyPage={historyPage}
+    changeHistoryPage={delta=>{pageRef.current=Math.max(0,pageRef.current+delta);setHistoryPage(pageRef.current);run(loadHistory);}}
+    queueHistory={id=>run(()=>queueHistory(id))} viewHistory={id=>run(()=>viewHistory(id))} detail={detail} showDetail={setDetail} closeDetail={()=>setDetail(null)}
+    copyDetail={()=>{if(detail)run(async()=>{await copy(detail.content);setDetail(null);});}} editDetail={()=>run(editDetail)} deleteDetail={deleteDetail}/>;
 }
-const s = StyleSheet.create({
-  root: {flex: 1, backgroundColor: '#f1f5f8'}, title: {fontSize: 28, fontWeight: '700', color: '#172b42'}, subtitle: {fontSize: 13, color: '#617287', marginVertical: 8},
-  card: {backgroundColor: '#fff', borderRadius: 14, padding: 14, marginVertical: 7, borderColor: '#dce5ec', borderWidth: 1}, strong: {fontSize: 14, fontWeight: '600', color: '#22394e'},
-  small: {fontSize: 12, color: '#65768a', marginVertical: 5}, warning: {fontSize: 12, color: '#a45413', marginTop: 5}, row: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 6},
-  button: {backgroundColor: '#235e84', borderRadius: 9, paddingVertical: 11, paddingHorizontal: 12, marginVertical: 3}, buttonText: {color: '#fff', fontSize: 13, fontWeight: '600'}, danger: {backgroundColor: '#a33d40'},
-  tab: {flex: 1, alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: '#e1e9ef'}, activeTab: {backgroundColor: '#235e84'}, activeText: {color: '#fff', fontWeight: '600'},
-  editor: {minHeight: 140, maxHeight: 340, fontSize: 16, color: '#1c3044', textAlignVertical: 'top', marginTop: 10}, body: {color: '#243c52', fontSize: 15, lineHeight: 23, marginVertical: 8},
-  full: {color: '#172b42', fontSize: 16, lineHeight: 25, paddingVertical: 16}, device: {padding: 9, color: '#235e84'}, search: {backgroundColor: '#fff', padding: 12, borderRadius: 10, marginVertical: 10},
-});

@@ -5,6 +5,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { ThemeProvider } from './src/theme/ThemeContext';
 import { HapticProvider } from './src/context/HapticContext';
 import { checkForUpdatesOnLaunch } from './src/lib/updateChecker';
+import PlusLifecycle from './src/plus/PlusLifecycle';
 
 export default function App() {
   useEffect(() => {
@@ -19,6 +20,7 @@ export default function App() {
     <ThemeProvider>
       <HapticProvider>
         <SafeAreaProvider>
+          <PlusLifecycle />
           <AppNavigator />
         </SafeAreaProvider>
       </HapticProvider>

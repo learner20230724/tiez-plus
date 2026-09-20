@@ -132,12 +132,13 @@ export async function sendRecord(record: Outbox) {
     notify(); throw error;
   }
 }
-export async function sendDrafts(drafts: Draft[]) {
+export async function sendDrafts(drafts: Draft[], onArchived?: (rows: Outbox[]) => void) {
   const target = runtime.selected || await runtime.store!.readCache<Endpoint>('last-endpoint');
   // Drafts are still saved even when no computer has ever been selected.
   for (const d of drafts) await runtime.store!.saveDraft(d);
   if (!target) throw new Error('文字已保存为草稿，尚未发现电脑');
-  const rows = await runtime.store!.prepare(drafts, target); notify();
+  const rows = await runtime.store!.prepare(drafts, target, true);
+  onArchived?.(rows); notify();
   const errors: string[] = [];
   for (const row of rows) try { await sendRecord(row); } catch (e) { errors.push(e instanceof Error ? e.message : String(e)); }
   if (errors.length) throw new Error(`${errors.length} 条未确认完成，已保留在历史中。${errors[0]}`);

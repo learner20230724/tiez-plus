@@ -64,7 +64,9 @@ try {
       & .\gradlew.bat assembleRelease '-PreactNativeArchitectures=arm64-v8a' '--init-script' (Join-Path $mapped 'scripts\android-paths.init.gradle') '--no-daemon' '--max-workers=2' '-Dorg.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8'
       if ($LASTEXITCODE -ne 0) { throw 'Android release build failed' }
     } finally { Pop-Location }
-    $artifact = Join-Path $mapped 'artifacts\TIEZ-Plus-0.1.0-arm64-v8a.apk'
+    $version = (Get-Content -LiteralPath 'app.json' -Raw -Encoding utf8 | ConvertFrom-Json).expo.version
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid Android artifact version' }
+    $artifact = Join-Path $mapped "artifacts\TIEZ-Plus-$version-arm64-v8a.apk"
     Copy-Item -LiteralPath 'android\app\build\outputs\apk\release\app-release.apk' -Destination $artifact -Force
     & (Join-Path $env:ANDROID_HOME 'build-tools\36.0.0\apksigner.bat') verify --verbose $artifact
     if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed' }

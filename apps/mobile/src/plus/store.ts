@@ -5,7 +5,8 @@ export interface Database {
   getFirstAsync<T>(sql: string, ...params: any[]): Promise<T | null>;
   getAllAsync<T>(sql: string, ...params: any[]): Promise<T[]>;
 }
-export type Draft = { id: string; content: string; revision: number; updated_at: number };
+export type DraftKind = 'input' | 'clipboard' | 'history' | 'retry';
+export type Draft = { id: string; content: string; revision: number; updated_at: number; kind?: DraftKind; source_outbox_id?: string | null };
 export type Target = { instanceId: string; desktopId: string };
 export type Outbox = {
   id: string; content: string; draft_id: string | null; draft_revision: number;
@@ -31,26 +32,61 @@ export class PlusStore {
       target_instance TEXT NOT NULL, target_device TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, delivered_at INTEGER, error TEXT, attempts INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS plus_cache(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS plus_outbox_created ON plus_outbox(created_at DESC);`);
+    const columns = await this.db.getAllAsync<{name: string}>('PRAGMA table_info(plus_drafts)');
+    if (!columns.some(c => c.name === 'kind')) await this.db.execAsync("ALTER TABLE plus_drafts ADD COLUMN kind TEXT NOT NULL DEFAULT 'input'");
+    if (!columns.some(c => c.name === 'source_outbox_id')) await this.db.execAsync('ALTER TABLE plus_drafts ADD COLUMN source_outbox_id TEXT');
     await this.db.runAsync("UPDATE plus_outbox SET status='unconfirmed',error='应用退出，送达结果待确认' WHERE status='sending'");
     await this.prune();
   }
   private async writeDraft(d: Draft) {
-    await this.db.runAsync(`INSERT INTO plus_drafts VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET content=excluded.content,revision=excluded.revision,updated_at=excluded.updated_at WHERE excluded.revision>=plus_drafts.revision`, d.id, d.content, d.revision, d.updated_at);
+    await this.db.runAsync(`INSERT INTO plus_drafts(id,content,revision,updated_at,kind,source_outbox_id) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET content=excluded.content,revision=excluded.revision,updated_at=excluded.updated_at,kind=excluded.kind,source_outbox_id=excluded.source_outbox_id WHERE excluded.revision>=plus_drafts.revision`, d.id, d.content, d.revision, d.updated_at, d.kind || 'input', d.source_outbox_id || null);
   }
   saveDraft(d: Draft) { return this.serialized(() => this.writeDraft(d)); }
   drafts() { return this.serialized(() => this.db.getAllAsync<Draft>('SELECT * FROM plus_drafts ORDER BY updated_at,id')); }
-  prepare(drafts: Draft[], target: Target) {
+  prepare(drafts: Draft[], target: Target, archiveDrafts = false) {
     return this.serialized(() => this.transaction(async () => {
       const result: Outbox[] = [];
       for (const d of drafts) {
         await this.writeDraft(d);
-        const record: Outbox = { id: this.uuid(), content: d.content, draft_id: d.id, draft_revision: d.revision,
+        let record: Outbox | null = null;
+        if (d.kind === 'retry' && d.source_outbox_id) {
+          record = await this.db.getFirstAsync<Outbox>('SELECT * FROM plus_outbox WHERE id=?', d.source_outbox_id);
+          if (!record || record.content !== d.content) throw new Error('原记录已变更，请编辑后重新推送');
+          if (record.target_instance !== target.instanceId || record.target_device !== target.desktopId) throw new Error('请在设置中连接这条记录原来的电脑，或编辑后作为新内容推送');
+        }
+        if (!record) {
+        record = { id: this.uuid(), content: d.content, draft_id: d.id, draft_revision: d.revision,
           target_instance: target.instanceId, target_device: target.desktopId, status: 'saved', created_at: this.clock(), delivered_at: null, error: null, attempts: 0 };
         await this.db.runAsync('INSERT INTO plus_outbox(id,content,draft_id,draft_revision,target_instance,target_device,status,created_at) VALUES(?,?,?,?,?,?,?,?)',
           record.id, record.content, record.draft_id, record.draft_revision, record.target_instance, record.target_device, record.status, record.created_at);
+        }
+        if (archiveDrafts && d.kind !== 'clipboard') await this.db.runAsync("UPDATE plus_drafts SET content='',revision=revision+1,updated_at=?,source_outbox_id=NULL WHERE id=? AND revision=? AND content=?", this.clock(), d.id, d.revision, d.content);
         result.push(record);
       }
       return result;
+    }));
+  }
+  captureClipboard(content: string) {
+    return this.serialized(() => this.transaction(async () => {
+      const old = await this.db.getFirstAsync<Draft>("SELECT * FROM plus_drafts WHERE kind='clipboard' LIMIT 1");
+      if (old?.content === content) return old;
+      // A changed system clipboard must not erase an older, still local item.
+      if (old) {
+        const archived = await this.db.getFirstAsync<{id:string}>('SELECT id FROM plus_outbox WHERE draft_id=? AND content=? LIMIT 1', old.id, old.content);
+        await this.db.runAsync("UPDATE plus_drafts SET kind='history',content=?,revision=revision+1 WHERE id=?", archived ? '' : old.content, old.id);
+      }
+      const draft: Draft = {id:this.uuid(),content,revision:1,updated_at:this.clock(),kind:'clipboard'};
+      await this.writeDraft(draft); return draft;
+    }));
+  }
+  queueHistory(id: string) {
+    return this.serialized(() => this.transaction(async () => {
+      const record = await this.db.getFirstAsync<Outbox>('SELECT * FROM plus_outbox WHERE id=?', id);
+      if (!record) throw new Error('记录已删除');
+      const existing = await this.db.getFirstAsync<Draft>("SELECT * FROM plus_drafts WHERE source_outbox_id=? AND content<>''", id);
+      if (existing) return existing;
+      const draft: Draft = {id:this.uuid(),content:record.content,revision:1,updated_at:this.clock(),kind:record.status==='delivered'?'history':'retry',source_outbox_id:id};
+      await this.writeDraft(draft); return draft;
     }));
   }
   markSending(id: string) { return this.serialized(() => this.db.runAsync("UPDATE plus_outbox SET status='sending',attempts=attempts+1,error=NULL WHERE id=? AND status<>'delivered'", id)); }
@@ -64,7 +100,7 @@ export class PlusStore {
       await this.db.runAsync('UPDATE plus_outbox SET status=?,error=?,delivered_at=? WHERE id=?', status, error, status === 'delivered' ? this.clock() : null, id);
       if (status === 'delivered' && r.draft_id) {
         // Compare-and-swap: never clear edits made while a send was in flight.
-        await this.db.runAsync("UPDATE plus_drafts SET content='',revision=revision+1,updated_at=? WHERE id=? AND revision=? AND content=?", this.clock(), r.draft_id, r.draft_revision, r.content);
+        await this.db.runAsync("UPDATE plus_drafts SET content='',revision=revision+1,updated_at=? WHERE id=? AND revision=? AND content=? AND kind<>'clipboard'", this.clock(), r.draft_id, r.draft_revision, r.content);
       }
     }));
   }

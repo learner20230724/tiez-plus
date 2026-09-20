@@ -1,10 +1,10 @@
 {
   "stable": {
-    "android": "0.1.0",
+    "android": "0.1.1",
     "ios": "0.1.0"
   },
   "beta": {
-    "android": "0.1.0",
+    "android": "0.1.1",
     "ios": "0.1.0"
   }
 }

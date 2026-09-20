@@ -39,6 +39,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 import { checkUpdate, RELEASE_CHANNEL } from '../lib/updateChecker';
 import packageJson from '../../package.json';
+import ConnectionSettings, { WebDavHistoryButton } from '../plus/ConnectionSettings';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 type ConfigScanKind = 'mqtt' | 'webdav';
@@ -447,10 +448,7 @@ export default function SettingsScreen() {
         </View>
 
         <View style={dynamicStyles.card}>
-          <View style={[styles.row, styles.blockRow]}>
-            <Text style={dynamicStyles.rowText}>TIEZ Plus · 自动发现与可靠 MQTT</Text>
-            <Text style={{color: colors.subText, fontSize: 13, lineHeight: 21, marginTop: 10}}>同一可信局域网自动连接。无需服务器、端口或主题配置。不会自动推送、重发或复制；到「同步」页手动操作。已送达记录保留 90 天，草稿和未确认记录不会自动删除。</Text>
-          </View>
+          <ConnectionSettings />
           <View style={dynamicStyles.divider} />
           <TouchableOpacity style={[styles.row, { paddingVertical: 18 }]} activeOpacity={0.7} onPress={toggleWebDAV}>
             <View style={dynamicStyles.iconBox}>
@@ -463,6 +461,7 @@ export default function SettingsScreen() {
           {isWebDAVExpanded && (
             <View style={[styles.row, styles.blockRow, { paddingTop: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider }]}>
               <View style={{ height: 16 }} />
+              <WebDavHistoryButton />
               <TouchableOpacity
                 style={[dynamicStyles.saveButton, { marginBottom: 14, backgroundColor: colors.iconBackground }]}
                 activeOpacity={0.8}
