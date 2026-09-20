@@ -17,8 +17,14 @@ function Set-PlusService([string]$Key,[string[]]$Values) {
   if ($LASTEXITCODE -ne 0) { throw "Unable to configure Plus service: $Key" }
 }
 Set-PlusService Application @($node)
-Set-PlusService AppParameters @('"'+$script+'"')
+# NSSM already has an absolute AppDirectory. A relative, whitespace-free entry
+# avoids Windows PowerShell 5.1 stripping embedded quotes during native argv marshalling.
+Set-PlusService AppParameters @('services\broker\index.cjs')
 Set-PlusService AppDirectory @($runtime)
+# Read registry values directly: NSSM writes UTF-16 to pipes, which PowerShell 5
+# otherwise decodes with embedded NUL characters.
+$actualParameters = Get-ItemPropertyValue -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\TiezPlusBroker\Parameters' -Name AppParameters
+if ($actualParameters -ne 'services\broker\index.cjs') { throw 'Plus service entrypoint verification failed' }
 Set-PlusService ObjectName @('NT AUTHORITY\LocalService')
 Set-PlusService DisplayName @('TIEZ Plus Broker')
 Set-PlusService Start @('SERVICE_AUTO_START')

@@ -2,7 +2,7 @@
 
 独立于旧版 TieZ 的个人局域网剪贴板工具：**先保存，再发送；电脑处理完成才算送达。**
 
-**Windows 安装修正：请使用 `TIEZ Plus_0.1.0_x64-setup-fix1.exe`。** 原安装器将首次安装时“服务不存在”误报为停止失败；修正与回归记录见 `docs/INSTALLER-FIX1.md`。手机 APK 不变，无须关闭旧版或杀毒软件。
+**Windows 安装修正：后续安装请使用 `TIEZ Plus_0.1.0_x64-setup-fix2.exe`。** 已修正首次安装的服务不存在误判，以及 `Program Files` 路径引号丢失导致的启动失败。记录见 `docs/INSTALLER-FIX1.md`、`docs/INSTALLER-FIX2.md`；用户授权后，本机 Plus 服务已直接修复并验证运行。手机 APK 不变，无须关闭旧版或杀毒软件。
 
 ## 首版行为
 
