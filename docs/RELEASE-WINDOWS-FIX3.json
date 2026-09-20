@@ -1,0 +1,21 @@
+{
+  "appVersion": "0.1.0",
+  "packagingRevision": "windows-desktop-fix3",
+  "sourceCommit": "a8d1bd581d86c5bb8aa871c61b688b95b5bc6ba5",
+  "builtAt": "2026-09-21T00:07:30.4328477+08:00",
+  "file": "TIEZ Plus_0.1.0_x64-setup-fix3.exe",
+  "bytes": 29136757,
+  "sha256": "5a0071958b68180114c9c208042a40bfc11725661786e06a02aa10e55a50056a",
+  "installedExecutableSha256": "9f5372060513be33728fccb2047d6c26af2cffa7c634c61fc30ca5c922262d89",
+  "nodeTestsPassed": 49,
+  "originalFilesUnchanged": 304,
+  "desktopAppLaunched": true,
+  "visibleWindowVerified": true,
+  "singleInstanceRevealVerified": true,
+  "diagnosticMqttApplicationPing": "passed",
+  "installedMqttApplicationPing": "passed",
+  "testClipboardReadsOrWrites": false,
+  "normalAppClipboardMonitorEnabled": true,
+  "phoneEndToEndTested": false,
+  "androidApkChangedByThisFix": false
+}
