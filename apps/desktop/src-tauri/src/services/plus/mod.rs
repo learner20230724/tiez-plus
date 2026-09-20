@@ -9,6 +9,7 @@ use tauri::{AppHandle,Emitter,Manager};
 
 static STATUS: OnceLock<Mutex<Value>> = OnceLock::new();
 pub fn sandbox() -> bool { cfg!(debug_assertions) || std::env::var("TIEZ_PLUS_SANDBOX").as_deref() == Ok("1") }
+pub fn diagnostics() -> bool { std::env::var("TIEZ_PLUS_DIAGNOSTICS").as_deref() == Ok("1") }
 fn now() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64 }
 fn status(app:&AppHandle, value:Value) { *STATUS.get_or_init(||Mutex::new(json!({}))).lock().unwrap()=value.clone(); let _=app.emit("plus-status",value); }
 #[tauri::command] pub fn get_plus_status() -> Value { STATUS.get_or_init(||Mutex::new(json!({"ready":false,"message":"Plus 服务尚未连接"}))).lock().unwrap().clone() }
@@ -52,7 +53,7 @@ async fn handle(app:&AppHandle,r:&core::Request) -> Result<Value,String> {
                 let db=app.state::<DbState>(); let conn=db.conn.lock().map_err(|_|"DB_LOCK")?;
                 core::set_state(&conn,r,"applying")?;
             }
-            let copied=if sandbox() { Err("隔离模式不允许写系统剪贴板".to_string()) }
+            let copied=if sandbox() || diagnostics() { Err("隔离诊断模式不允许写系统剪贴板".to_string()) }
                 else if text.contains('\0') { Err("电脑已保存，Windows 文本剪贴板不支持空字符；未修改剪贴板".to_string()) }
                 else { crate::services::clipboard_ops::prepare_clipboard_payload(text,"text",None,false).await.map_err(|_|"电脑已保存，但剪贴板写入失败".to_string()) };
             let next=if copied.is_ok(){"delivered"}else{"copy_failed"};
@@ -61,7 +62,7 @@ async fn handle(app:&AppHandle,r:&core::Request) -> Result<Value,String> {
             Ok(json!({"status":next,"error":copied.err()}))
         },
         "get_current" => {
-            if sandbox() {return Err("隔离模式不读取系统剪贴板".into());}
+            if sandbox() || diagnostics() {return Err("隔离诊断模式不读取系统剪贴板".into());}
             let text=tauri::async_runtime::spawn_blocking(|| {
                 let mut clipboard=arboard::Clipboard::new().map_err(|_|"无法打开电脑剪贴板")?;
                 clipboard.get_text().map_err(|_| {
@@ -118,7 +119,8 @@ async fn run(app:AppHandle)->Result<(),String> {
     let endpoint_file=std::path::PathBuf::from(std::env::var("ProgramData").unwrap_or_else(|_|"C:\\ProgramData".into())).join("TIEZ Plus/broker/endpoint.json");
     let endpoint:Value=serde_json::from_slice(&std::fs::read(endpoint_file).map_err(|_|"Plus 后台服务未安装或未启动")?).map_err(|_|"服务配置损坏")?;
     let port=endpoint["httpPort"].as_u64().filter(|p|*p>0&&*p<=65535).ok_or("服务端口无效")?;
-    let http=reqwest::Client::builder().timeout(Duration::from_secs(4)).build().map_err(|_|"HTTP_INIT")?;
+    // The private loopback broker must not go through system/environment proxies.
+    let http=reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(4)).build().map_err(|_|"HTTP_INIT")?;
     let enrollment:Value=http.post(format!("http://127.0.0.1:{port}/api/v1/enroll")).json(&json!({"role":"desktop","name":"TIEZ Plus Desktop"})).send().await.map_err(|_|"无法连接 Plus 服务")?.error_for_status().map_err(|_|"服务注册失败")?.json().await.map_err(|_|"服务响应格式错误")?;
     let desktop=enrollment["desktopId"].as_str().filter(|s|core::valid_id(s)).ok_or("INVALID_DESKTOP")?.to_string();
     let instance=enrollment["instanceId"].as_str().filter(|s|core::valid_id(s)).ok_or("INVALID_INSTANCE")?.to_string();

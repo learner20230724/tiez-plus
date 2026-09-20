@@ -100,7 +100,7 @@ pub fn init(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
     // 10. Win32 Hook Initialization
     #[cfg(target_os = "windows")]
-    if !crate::services::plus::sandbox() { init_win32_hooks(app); }
+    if !crate::services::plus::sandbox() && !crate::services::plus::diagnostics() { init_win32_hooks(app); }
 
     // 11. TaskbarCreated & Subclass
     #[cfg(target_os = "windows")]
@@ -218,9 +218,9 @@ fn load_settings(repo: &impl SettingsRepository) -> StartupSettings {
             .unwrap_or(false),
         silent_start: repo
             .get("app.silent_start")
-            .unwrap_or(Some("true".to_string()))
+            .unwrap_or(Some("false".to_string()))
             .map(|v| v == "true")
-            .unwrap_or(true),
+            .unwrap_or(false),
         delete_after_paste: repo
             .get("app.delete_after_paste")
             .unwrap_or(Some("false".to_string()))
@@ -449,9 +449,11 @@ fn setup_main_window(app: &App, s: &StartupSettings) {
     let args: Vec<String> = std::env::args().collect();
     let is_autostart =
         args.contains(&"--autostart".to_string()) || args.contains(&"--minimized".to_string());
-    if !is_autostart && !s.silent_start {
+    // Explicit double-click must open the client; only login/minimized launches stay hidden.
+    if !is_autostart {
         if let Some(window) = app.get_webview_window("main") {
             let _ = window.show();
+            let _ = window.set_focus();
         }
     }
 }
@@ -596,12 +598,15 @@ fn clamp_window_rect_to_monitor(rect: WindowRect, monitor: &tauri::Monitor) -> (
 
 fn start_services(app: &App, s: &StartupSettings, app_handle: AppHandle) {
     if crate::services::plus::sandbox() { return; }
+    crate::services::plus::start(app_handle.clone());
+    // A startup/protocol probe must not install hooks, read or write the clipboard,
+    // register shortcuts, or initialize auto-start/cloud sync.
+    if crate::services::plus::diagnostics() { return; }
     // First explicit Plus launch enables only the current user's independent Plus login entry.
     let plus_repo = &app.state::<DbState>().settings_repo;
     if plus_repo.get("plus.autostart_initialized").ok().flatten().is_none() {
         if crate::app::commands::toggle_autostart(true).is_ok() { let _ = plus_repo.set("plus.autostart_initialized", "true"); }
     }
-    crate::services::plus::start(app_handle.clone());
     crate::infrastructure::windows_api::window_tracker::start_window_tracking(app_handle.clone());
     crate::services::clipboard::start_clipboard_monitor(app_handle.clone());
     // Legacy MQTT is available in settings but never started by default.

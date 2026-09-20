@@ -14,15 +14,21 @@ pub mod services;
 use crate::app::setup;
 use crate::global_state::*;
 use std::sync::atomic::Ordering;
+use tauri::Manager;
 
 fn main() {
+    // Plugin initialization can fail before setup::init initializes the normal log.
+    let startup_dir = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir).join("TIEZ Plus");
+    let _ = std::fs::create_dir_all(&startup_dir);
+    let startup_log = startup_dir.join("startup.log");
+    crate::logger::init(startup_log.clone());
     // 显式安装 rustls 的 crypto provider，防止 rumqttc 因缺少 provider 而 panic
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let _ = dotenvy::dotenv();
 
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -39,7 +45,16 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == "--minimized" || a == "--autostart") { return; }
+            if let Some(window) = app.get_webview_window("main") {
+                IS_HIDDEN.store(false, Ordering::Relaxed);
+                CURRENT_DOCK.store(0, Ordering::Relaxed);
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = app::window_manager::focus_clipboard_window(app.clone());
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -179,6 +194,11 @@ fn main() {
         }
         Err(e) => {
             error!(">>> [STARTUP] Failed to build tauri app: {}", e);
+            if !services::plus::sandbox() && !services::plus::diagnostics() {
+                infrastructure::windows_ext::WindowExt::show_error_box("TIEZ Plus 启动失败",
+                    &format!("桌面客户端未能启动：{}\n启动日志：{}", e, startup_log.display()));
+            }
+            std::process::exit(1);
         }
     }
 
