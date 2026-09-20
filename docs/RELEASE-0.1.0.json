@@ -1,0 +1,39 @@
+{
+  "version": "0.1.0",
+  "sourceCommit": "1bd514924b4cf7e4b309f938bfefd5df22d43db1",
+  "builtAt": "2026-09-20T20:32:13.9578533+08:00",
+  "automatedTests": {
+    "sourceIsolationFiles": 304,
+    "node": 25,
+    "rust": 5,
+    "mobileTypecheck": "passed"
+  },
+  "android": {
+    "targetSdk": 36,
+    "package": "io.github.learner20230724.tiezplus",
+    "abi": "arm64-v8a",
+    "certificateSha256": "b91168536b754de321972b053749155ba5a20299b1bab8042862c01ff1cac2d5",
+    "minSdk": 24,
+    "elfLibraries16KiB": 20
+  },
+  "windows": {
+    "brokerService": "TiezPlusBroker",
+    "signed": false,
+    "architecture": "x64",
+    "nodeBundled": true
+  },
+  "artifacts": [
+    {
+      "file": "TIEZ Plus_0.1.0_x64-setup.exe",
+      "bytes": 29251409,
+      "sha256": "72160aa06adbb4210c6d668ba25addd670f4b6fa6a24daf262562efe2e0e929f"
+    },
+    {
+      "file": "TIEZ-Plus-0.1.0-arm64-v8a.apk",
+      "bytes": 35043948,
+      "sha256": "7775f31d42dcd4db45b7da57a16a0023b3c99f249123dd02cb00dabac99eeac0"
+    }
+  ],
+  "installed": false,
+  "deviceAndVmAcceptance": "Not performed; see ACCEPTANCE.md"
+}
