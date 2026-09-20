@@ -25,7 +25,7 @@ export const RELEASE_CHANNEL: ReleaseChannel =
   process.env.EXPO_PUBLIC_TIEZ_RELEASE_CHANNEL === 'beta' ? 'beta' : 'stable';
 
 const UPDATE_ENDPOINT =
-  process.env.EXPO_PUBLIC_TIEZ_UPDATE_ENDPOINT?.trim() || DEFAULT_UPDATE_ENDPOINT;
+  process.env.EXPO_PUBLIC_TIEZ_PLUS_UPDATE_ENDPOINT?.trim() || DEFAULT_UPDATE_ENDPOINT;
 
 function getAndroidArch(): string {
   const supportedAbis = ((Platform.constants as { SupportedAbis?: string[] }).SupportedAbis || [])

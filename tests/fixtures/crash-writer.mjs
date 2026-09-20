@@ -1,0 +1,11 @@
+import { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
+import storeModule from '../../apps/mobile/src/plus/store.ts';
+const db=new DatabaseSync(process.argv[2]);
+const adapter={execAsync:async q=>db.exec(q),runAsync:async(q,...p)=>db.prepare(q).run(...p),getFirstAsync:async(q,...p)=>db.prepare(q).get(...p)??null,getAllAsync:async(q,...p)=>db.prepare(q).all(...p)};
+const store=new storeModule.PlusStore(adapter,randomUUID);
+await store.init();
+const [record]=await store.prepare([{id:'crash-draft',content:'进程退出也不能丢\n  🙂',revision:1,updated_at:1}],{instanceId:'i',desktopId:'d'});
+await store.markSending(record.id);
+process.stdout.write('DURABLE\n');
+setInterval(()=>{},1000);

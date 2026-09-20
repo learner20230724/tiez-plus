@@ -5,6 +5,7 @@ import * as Crypto from 'expo-crypto';
 import { PlusStore, type Outbox, type Draft } from './store';
 import { PlusConnection, type Endpoint, type Credentials } from './transport';
 import * as P from '../../../../protocol/index.cjs';
+import { chooseEndpoint } from './discovery';
 
 export const uuid = () => Crypto.randomUUID();
 const listeners = new Set<() => void>();
@@ -41,15 +42,16 @@ export async function inspectEndpoint(host: string, port: number) {
   try {
     const i = await fetchJson(`http://${host}:${port}/api/v1/info`);
     if (i.product !== 'tiez-plus' || i.v !== 1 || !P.validId(i.instanceId) || !P.validId(i.desktopId) || i.wsPath !== '/mqtt') throw new Error('不兼容的 Plus 协议');
-    const endpoint: Endpoint & { seen: number } = { ...i, host, httpPort: port, seen: Date.now() };
+    const endpoint: Endpoint & { seen: number } = { ...i, name: String(i.name || 'TIEZ Plus').slice(0,80), host, httpPort: port, seen: Date.now() };
     runtime.endpoints.set(i.instanceId, endpoint); notify();
     clearTimeout(chooseTimer);
     chooseTimer = setTimeout(() => {
       if (!active || runtime.connection?.connected || runtime.connecting) return;
       const list = [...runtime.endpoints.values()].filter(e => Date.now() - e.seen < 45000);
-      const match = list.find(e => e.instanceId === preferred) || (!preferred && list.length === 1 ? list[0] : null);
+      const match = chooseEndpoint(list, preferred);
       if (match) void connect(match); else { runtime.status = preferred ? '上次连接的电脑不可用；可手动选择另一台电脑' : '发现多台电脑，请选择设备名'; notify(); }
-    }, 900);
+    }, preferred ? 300 : 3000);
+    return endpoint;
   } finally { checking.delete(key); }
 }
 export async function connect(endpoint: Endpoint) {
@@ -87,7 +89,7 @@ async function probe(c: PlusConnection) {
 }
 let nativeSubscriptions: Array<{remove(): void}> = [];
 export async function startDiscovery() {
-  await init(); if (active) return; active = true;
+  await init(); if (active) return; active = true; await runtime.store!.prune();
   const native = NativeModules.PlusDiscovery;
   if (native) {
     const emitter = new NativeEventEmitter(native);

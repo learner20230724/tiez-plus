@@ -6,9 +6,12 @@ import * as Clipboard from 'expo-clipboard';
 import { runtime, init, subscribe, startDiscovery, stopDiscovery, connect, inspectEndpoint, sendDrafts, sendRecord, uuid } from './runtime';
 import type { Draft, Outbox } from './store';
 import type { Endpoint } from './transport';
+import { mergeDrafts, readComputer, readEntry, copyText } from './actions';
+import { fetchWebDavEntries, loadMobileSyncSettings, type SyncedEntry } from '../lib/sync';
+const copy = (text: string) => copyText(text, Clipboard.setStringAsync);
 
 type RemoteEntry = { id: string; preview: string; timestamp: number; content_type: string };
-type PullCache = { instanceId: string; name: string; at: number; current: { content?: string; error?: string; ok: boolean }; entries: RemoteEntry[] };
+type PullCache = { instanceId: string; name: string; at: number; current: { content?: string; error?: string; ok: boolean }; entries: RemoteEntry[]; note?: string };
 const stateName: Record<string, string> = { saved: '已保存，待手动发送', sending: '等待电脑确认', unconfirmed: '未确认送达', delivered: '已送达', stored: '电脑已保存', copy_failed: '电脑已保存，剪贴板写入失败', unknown: '结果待确认', rejected: '未送达' };
 
 export default function PlusHome() {
@@ -25,6 +28,7 @@ export default function PlusHome() {
   const busyRef = useRef(false);
   const [pull, setPull] = useState<PullCache | null>(null);
   const [pullError, setPullError] = useState('');
+  const [webdav, setWebdav] = useState<SyncedEntry[]>([]);
   const [detail, setDetail] = useState<{title: string; content: string; record?: Outbox} | null>(null);
   const [qr, setQr] = useState(false);
   const qrGuard = useRef(false);
@@ -35,9 +39,7 @@ export default function PlusHome() {
   async function reload() {
     if (!runtime.store) return;
     const persisted = await runtime.store.drafts();
-    const current = new Map(draftsRef.current.map(d => [d.id, d]));
-    const merged = persisted.map(d => { const local = current.get(d.id); current.delete(d.id); return local && local.revision > d.revision ? local : d; });
-    updateDrafts([...merged, ...current.values()]);
+    updateDrafts(mergeDrafts(persisted, draftsRef.current));
     setHistory(await runtime.store.history());
   }
   async function flush() {
@@ -65,22 +67,19 @@ export default function PlusHome() {
   async function pullNow() {
     setPage('pull'); setPullError('');
     const c = runtime.connection;
-    if (!c?.connected) throw new Error('电脑未连接；上次拉取结果仍保留');
+    if (!c?.connected) { setPullError('本次拉取失败，下方为旧缓存'); throw new Error('电脑未连接；上次拉取结果仍保留'); }
     try {
-      const current = await c.request('get_current');
-      const recent = await c.request('get_history', { limit: 50 });
-      if (!recent.ok) throw new Error(recent.error || '历史读取失败');
-      const cache: PullCache = { instanceId: c.endpoint.instanceId, name: c.endpoint.name, at: Date.now(), current, entries: recent.entries || [] };
+      const result = await readComputer(c);
+      const cache: PullCache = { instanceId: c.endpoint.instanceId, name: c.endpoint.name, at: Date.now(), ...result };
       await runtime.store!.cache('pull', cache); setPull(cache);
     } catch (e) { setPullError('本次拉取失败，下方为旧缓存'); throw e; }
   }
   async function showRemote(entry: RemoteEntry, copy = false) {
     const c = runtime.connection;
     if (!c?.connected || c.endpoint.instanceId !== pull?.instanceId) throw new Error('原电脑未连接，不能获取完整正文');
-    const response = await c.request('get_content', { entryId: entry.id });
-    if (!response.ok || typeof response.content !== 'string') throw new Error(response.error || '正文读取失败');
-    if (copy) { await Clipboard.setStringAsync(response.content); Alert.alert('已复制', '完整正文已复制到手机剪贴板'); }
-    else setDetail({ title: '电脑记录全文', content: response.content });
+    const content = await readEntry(c, entry.id);
+    if (copy) { await copyText(content, Clipboard.setStringAsync); Alert.alert('已复制', '完整正文已复制到手机剪贴板'); }
+    else setDetail({ title: '电脑记录全文', content });
   }
   useEffect(() => {
     let alive = true;
@@ -139,12 +138,18 @@ export default function PlusHome() {
         {!!pullError && <Text style={s.warning}>{pullError}</Text>}
         {pull && <><Text style={s.small}>{pull.name} · 缓存于 {new Date(pull.at).toLocaleString()}{!runtime.ready ? ' · 离线/未就绪' : ''}</Text>
           <View style={s.card}><Text style={s.strong}>电脑当前剪贴板（拉取时快照）</Text><Text selectable style={s.body}>{pull.current.content?.slice(0, 500) || pull.current.error || '没有文字'}</Text>
-            {typeof pull.current.content === 'string' && <View style={s.row}><Button label="全文" onPress={() => setDetail({title: '电脑当前内容', content: pull.current.content!})}/><Button label="复制" onPress={() => { void perform(async () => { await Clipboard.setStringAsync(pull.current.content!); Alert.alert('已复制'); }); }}/></View>}
+            {typeof pull.current.content === 'string' && <View style={s.row}><Button label="全文" onPress={() => setDetail({title: '电脑当前内容', content: pull.current.content!})}/><Button label="复制" onPress={() => { void perform(async () => { await copy(pull.current.content!); Alert.alert('已复制'); }); }}/></View>}
           </View>
+          {!!pull.note && <Text style={s.warning}>{pull.note}</Text>}
           {pull.entries.map(e => <View style={s.card} key={e.id}><Text style={s.body}>{e.preview}</Text><Text style={s.small}>{new Date(e.timestamp).toLocaleString()}</Text><View style={s.row}><Button label="查看全文" onPress={() => { void perform(() => showRemote(e)); }}/><Button label="复制" onPress={() => { void perform(() => showRemote(e, true)); }}/></View></View>)}
         </>}
       </>}
-      {page === 'history' && <>
+      {page === 'pull' && <View style={s.card}>
+        <Text style={s.small}>高级 · 原 WebDAV（独立操作，不作为 MQTT 失败回退；配置在设置页）</Text>
+        <Button label="手动读取 WebDAV 历史" onPress={() => { void perform(async () => { setWebdav(await fetchWebDavEntries(await loadMobileSyncSettings())); }); }}/>
+        {webdav.map(e => <Pressable key={e.id} onPress={() => setDetail({title: 'WebDAV 全文',content:e.content})}><Text style={s.body}>{e.preview || e.content.slice(0,200)}</Text></Pressable>)}
+      </View>}
+      {page === 'history'  && <>
         <Text style={s.small}>已送达保留 90 天；失败、待确认和草稿不自动删除。</Text>
         <TextInput style={s.search} placeholder="搜索手机历史正文" value={search} onChangeText={setSearch}/>
         {history.filter(r => r.content.includes(search)).map(r => <Pressable key={r.id} style={s.card} onPress={() => setDetail({title: '手机记录全文', content: r.content, record: r})}>
@@ -154,13 +159,13 @@ export default function PlusHome() {
     </ScrollView>
     <Modal visible={!!detail} animationType="slide" onRequestClose={() => setDetail(null)}><View style={[s.root, {paddingTop: insets.top + 14, padding: 18}]}>
       <Text style={s.title}>{detail?.title}</Text><ScrollView style={{flex: 1}}><Text selectable style={s.full}>{detail?.content}</Text></ScrollView>
-      <View style={s.row}><Button label="关闭" onPress={() => setDetail(null)}/><Button label="复制全文" onPress={() => { void perform(async () => { await Clipboard.setStringAsync(detail!.content); Alert.alert('已复制'); }); }}/><Button label="编辑/再次发送" onPress={() => { const text = detail!.content; setDetail(null); void addDraft(text).catch(showError); }}/></View>
+      <View style={s.row}><Button label="关闭" onPress={() => setDetail(null)}/><Button label="复制全文" onPress={() => { void perform(async () => { await copy(detail!.content); Alert.alert('已复制'); }); }}/><Button label="编辑/再次发送" onPress={() => { const text = detail!.content; setDetail(null); void addDraft(text).catch(showError); }}/></View>
       {detail?.record && <View style={s.row}>{detail.record.status !== 'delivered' && <Button label="原样重试" onPress={() => { const r = detail.record!; void perform(async () => { await sendRecord(r); setDetail(null); Alert.alert('已送达'); }); }}/>}<Button label="删除记录" danger onPress={() => Alert.alert('删除记录？', '删除后无法从本机历史恢复。', [{text: '取消', style: 'cancel'}, {text: '删除', style: 'destructive', onPress: () => { const id = detail.record!.id; void perform(async () => { await runtime.store!.remove(id); setDetail(null); }); }}])}/></View>}
     </View></Modal>
     <Modal visible={qr} onRequestClose={() => setQr(false)}><View style={[s.root, {paddingTop: insets.top + 12, padding: 18}]}><Text style={s.title}>扫描电脑上的 Plus 连接码</Text>
       {!permission?.granted ? <Button label="允许相机" onPress={() => { void askPermission(); }}/> : <CameraView style={{flex: 1}} barcodeScannerSettings={{barcodeTypes: ['qr']}} onBarcodeScanned={({data}) => {
         if (qrGuard.current) return; qrGuard.current = true;
-        void (async () => { const json = data.startsWith('tiezplus://connect?data=') ? decodeURIComponent(data.split('?data=')[1]) : data; const value = JSON.parse(json); if (value.product !== 'tiez-plus' || value.v !== 1) throw new Error('请扫描 TIEZ Plus 的连接码'); await inspectEndpoint(value.host, value.httpPort); setQr(false); })().catch(e => { showError(e); qrGuard.current = false; });
+        void (async () => { const json = data.startsWith('tiezplus://connect?data=') ? decodeURIComponent(data.split('?data=')[1]) : data; const value = JSON.parse(json); if (value.product !== 'tiez-plus' || value.v !== 1) throw new Error('请扫描 TIEZ Plus 的连接码'); const found = await inspectEndpoint(value.host, value.httpPort); if (found) await connect(found); setQr(false); })().catch(e => { showError(e); qrGuard.current = false; });
       }}/>}<Button label="取消" onPress={() => setQr(false)}/>
     </View></Modal>
   </KeyboardAvoidingView>;

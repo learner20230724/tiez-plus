@@ -31,7 +31,7 @@ async fn handle(app:&AppHandle,r:&core::Request) -> Result<Value,String> {
         "delivery_status" => {
             let db=app.state::<DbState>(); let conn=db.conn.lock().map_err(|_|"DB_LOCK")?;
             let receipt=core::receipt(&conn,&r.from,&r.id)?;
-            Ok(json!({"status":receipt.map(|v|v.status).unwrap_or_else(||"not_found".into())}))
+            Ok(json!({"status":receipt.map(|v|if v.status=="applying" {"unknown".into()} else {v.status}).unwrap_or_else(||"not_found".into())}))
         },
         "send_text" => {
             let text=r.content.as_deref().ok_or("EMPTY_TEXT")?;
@@ -53,6 +53,7 @@ async fn handle(app:&AppHandle,r:&core::Request) -> Result<Value,String> {
                 core::set_state(&conn,r,"applying")?;
             }
             let copied=if sandbox() { Err("隔离模式不允许写系统剪贴板".to_string()) }
+                else if text.contains('\0') { Err("电脑已保存，Windows 文本剪贴板不支持空字符；未修改剪贴板".to_string()) }
                 else { crate::services::clipboard_ops::prepare_clipboard_payload(text,"text",None,false).await.map_err(|_|"电脑已保存，但剪贴板写入失败".to_string()) };
             let next=if copied.is_ok(){"delivered"}else{"copy_failed"};
             let db=app.state::<DbState>(); let conn=db.conn.lock().map_err(|_|"DB_LOCK")?;
@@ -63,11 +64,21 @@ async fn handle(app:&AppHandle,r:&core::Request) -> Result<Value,String> {
             if sandbox() {return Err("隔离模式不读取系统剪贴板".into());}
             let text=tauri::async_runtime::spawn_blocking(|| {
                 let mut clipboard=arboard::Clipboard::new().map_err(|_|"无法打开电脑剪贴板")?;
-                clipboard.get_text().map_err(|_|"电脑剪贴板为空或当前内容不是文字")
+                clipboard.get_text().map_err(|_| {
+                    use windows::Win32::System::DataExchange::{CountClipboardFormats,IsClipboardFormatAvailable};
+                    unsafe {
+                        if CountClipboardFormats() == 0 { "电脑剪贴板为空" }
+                        else if IsClipboardFormatAvailable(13).is_err() { "当前剪贴板只有图片、文件或不支持的格式" }
+                        else { "电脑剪贴板读取失败，可能正被其他程序占用" }
+                    }
+                })
             }).await.map_err(|_|"剪贴板读取任务失败")??;
             if text.is_empty(){return Err("电脑剪贴板为空".into());}
             if text.len()>core::MAX_TEXT_BYTES {return Err("当前文字超过 1 MiB，未截断或传输".into());}
             if sensitive(app,&text) {return Err("当前内容受敏感信息保护，不能远程导出".into());}
+            if app.state::<SessionHistory>().0.lock().map_err(|_|"HISTORY_LOCK")?.iter().any(|e|e.content == text && !exportable(app,e)) {
+                return Err("当前内容受敏感标签保护".into());
+            }
             let db=app.state::<DbState>();
             if let Some(id)=db.repo.get_entry_by_content(&text,None)? {
                 if let Some(e)=db.repo.get_entry_by_id(id)? {if !exportable(app,&e){return Err("当前内容受敏感标签保护".into());}}
@@ -77,16 +88,20 @@ async fn handle(app:&AppHandle,r:&core::Request) -> Result<Value,String> {
         "get_history" => {
             let ids={
                 let db=app.state::<DbState>(); let conn=db.conn.lock().map_err(|_|"DB_LOCK")?;
-                let mut stmt=conn.prepare("SELECT id FROM clipboard_history WHERE content_type IN ('text','code','url','rich_text') ORDER BY timestamp DESC,id DESC LIMIT 1000").map_err(|e|e.to_string())?;
+                let mut stmt=conn.prepare("SELECT id FROM clipboard_history WHERE content_type IN ('text','code','url','rich_text') ORDER BY timestamp DESC,id DESC").map_err(|e|e.to_string())?;
                 let rows=stmt.query_map([],|row|row.get::<_,i64>(0)).map_err(|e|e.to_string())?;
                 rows.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?
             };
             let mut all:Vec<ClipboardEntry>=Vec::new();
-            for id in ids {if let Some(e)=entry(app,id)? {if exportable(app,&e) {all.push(e);}}}
+            let mut hidden=0;
+            for id in ids {
+                if let Some(e)=entry(app,id)? {if exportable(app,&e) {all.push(e);} else {hidden+=1;}}
+                if all.len()>=50 {break;}
+            }
             all.extend(app.state::<SessionHistory>().0.lock().map_err(|_|"HISTORY_LOCK")?.iter().filter(|e|e.id<0 && exportable(app,e)).cloned());
             all.sort_by(|a,b|b.timestamp.cmp(&a.timestamp).then(b.id.cmp(&a.id)));
             let list:Vec<Value>=all.iter().take(50).map(|e|json!({"id":e.id.to_string(),"preview":e.content.chars().take(200).collect::<String>(),"timestamp":e.timestamp,"content_type":e.content_type})).collect();
-            Ok(json!({"ok":true,"entries":list}))
+            Ok(json!({"ok":true,"entries":list,"note":if hidden>0 {format!("已隐藏 {hidden} 条受保护记录")} else {String::new()}}))
         },
         "get_content" => {
             let id=r.entry_id.as_deref().ok_or("INVALID_ENTRY")?.parse::<i64>().map_err(|_|"INVALID_ENTRY")?;

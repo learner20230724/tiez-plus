@@ -342,7 +342,7 @@ export default function SettingsScreen() {
   const handleClearLocalCache = () => {
     Alert.alert(
       '清理本地缓存',
-      '会清空手机端已缓存的 WebDAV 拉取记录、增量游标和本地索引，但不会删除你的同步配置。',
+      '会清空手机端已缓存的 WebDAV 拉取记录、增量游标和本地索引，但不会删除你的同步配置、Plus 草稿或发送历史。',
       [
         { text: '取消', style: 'cancel' },
         {
@@ -447,164 +447,11 @@ export default function SettingsScreen() {
         </View>
 
         <View style={dynamicStyles.card}>
-          <View style={[styles.row, { paddingVertical: 14 }]}>
-            <View style={dynamicStyles.iconBox}>
-              <Feather name="zap" size={18} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={dynamicStyles.rowText}>打开应用后自动推送</Text>
-              <Text style={{ color: colors.subText, fontSize: 11 }}>检测并推送最新剪贴板内容到 PC</Text>
-            </View>
-            <TouchableOpacity 
-              onPress={() => {
-                triggerHaptic();
-                updateSyncField('autoPushOnLaunch', !syncSettings?.autoPushOnLaunch as any, { persist: true });
-              }}
-              style={{ 
-                width: 50, 
-                height: 28, 
-                borderRadius: 14, 
-                backgroundColor: syncSettings?.autoPushOnLaunch ? colors.primary : colors.iconBackground,
-                justifyContent: 'center',
-                paddingHorizontal: 2
-              }}
-            >
-              <View style={{ 
-                width: 24, 
-                height: 24, 
-                borderRadius: 12, 
-                backgroundColor: colors.primaryText,
-                transform: [{ translateX: syncSettings?.autoPushOnLaunch ? 22 : 0 }]
-              }} />
-            </TouchableOpacity>
+          <View style={[styles.row, styles.blockRow]}>
+            <Text style={dynamicStyles.rowText}>TIEZ Plus · 自动发现与可靠 MQTT</Text>
+            <Text style={{color: colors.subText, fontSize: 13, lineHeight: 21, marginTop: 10}}>同一可信局域网自动连接。无需服务器、端口或主题配置。不会自动推送、重发或复制；到「同步」页手动操作。已送达记录保留 90 天，草稿和未确认记录不会自动删除。</Text>
           </View>
-          
           <View style={dynamicStyles.divider} />
-
-          <View style={[styles.row, { paddingVertical: 14 }]}>
-            <View style={dynamicStyles.iconBox}>
-              <Feather name="send" size={18} color={colors.text} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={dynamicStyles.rowText}>推送实现策略</Text>
-              <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '600' }}>MQTT 体验更好、更快速</Text>
-            </View>
-            <View style={dynamicStyles.segmentedControl}>
-              {(['mqtt', 'webdav'] as const).map((strategy) => (
-                <TouchableOpacity
-                  key={strategy}
-                  style={[dynamicStyles.segmentBtn, syncSettings?.pushStrategy === strategy && dynamicStyles.segmentBtnActive]}
-                  onPress={() => {
-                    triggerHaptic();
-                    updateSyncField('pushStrategy', strategy, { persist: true });
-                  }}
-                >
-                  <Text style={[dynamicStyles.segmentBtnText, syncSettings?.pushStrategy === strategy && dynamicStyles.segmentBtnTextActive]}>
-                    {strategy === 'mqtt' ? 'MQTT' : 'WebDAV'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-          
-          <View style={dynamicStyles.divider} />
-
-          <TouchableOpacity style={[styles.row, { paddingVertical: 18 }]} activeOpacity={0.7} onPress={toggleMQTT}>
-            <View style={dynamicStyles.iconBox}>
-              <Feather name="zap" size={18} color={colors.text} />
-            </View>
-            <Text style={dynamicStyles.rowText}>MQTT 推送配置</Text>
-            <Text style={[dynamicStyles.valueText, { marginRight: 8, fontSize: 13 }]}>{isMQTTExpanded ? '收起' : '修改'}</Text>
-            <Feather name={isMQTTExpanded ? "chevron-up" : "chevron-down"} size={18} color={colors.subText} />
-          </TouchableOpacity>
-          {isMQTTExpanded && (
-            <View style={[styles.row, styles.blockRow, { paddingTop: 0, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider }]}>
-              <View style={{ height: 16 }} />
-              <TouchableOpacity
-                style={[dynamicStyles.saveButton, { marginBottom: 14, backgroundColor: colors.iconBackground }]}
-                activeOpacity={0.8}
-                onPress={() => void openConfigScanner('mqtt')}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Feather name="camera" size={16} color={colors.text} />
-                  <Text style={[dynamicStyles.saveButtonText, { color: colors.text }]}>扫码导入电脑 MQTT 配置</Text>
-                </View>
-              </TouchableOpacity>
-              <Text style={dynamicStyles.formLabel}>服务器地址 (Host)</Text>
-              <TextInput value={syncSettings?.mqttServer ?? ''} onChangeText={(text) => updateSyncField('mqttServer', text)} placeholder="broker.emqx.io" placeholderTextColor={colors.subText} style={dynamicStyles.input} autoCapitalize="none" autoCorrect={false} />
-              
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={dynamicStyles.formLabel}>端口</Text>
-                  <TextInput value={syncSettings?.mqttPort ?? ''} onChangeText={(text) => updateSyncField('mqttPort', text)} placeholder="8883" placeholderTextColor={colors.subText} style={dynamicStyles.input} keyboardType="numeric" />
-                </View>
-                <View style={{ flex: 2 }}>
-                  <Text style={dynamicStyles.formLabel}>协议</Text>
-                  <View style={[dynamicStyles.segmentedControl, { height: 44 }]}>
-                    {(['ws://', 'wss://'] as const).map((p) => (
-                      <TouchableOpacity 
-                        key={p} 
-                        style={[
-                          dynamicStyles.segmentBtn, 
-                          syncSettings?.mqttProtocol === p && dynamicStyles.segmentBtnActive,
-                          { flex: 1, justifyContent: 'center', alignItems: 'center' }
-                        ]} 
-                        onPress={() => updateSyncField('mqttProtocol', p)}
-                      >
-                        <Text style={[
-                          dynamicStyles.segmentBtnText, 
-                          syncSettings?.mqttProtocol === p && dynamicStyles.segmentBtnTextActive,
-                        ]}>
-                          {p.replace('://', '')}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              </View>
-
-              <Text style={dynamicStyles.formLabel}>用户名 (可选)</Text>
-              <TextInput value={syncSettings?.mqttUsername ?? ''} onChangeText={(text) => updateSyncField('mqttUsername', text)} placeholder="Username" placeholderTextColor={colors.subText} style={dynamicStyles.input} autoCapitalize="none" autoCorrect={false} />
-              <Text style={dynamicStyles.formLabel}>密码 (可选)</Text>
-              <TextInput value={syncSettings?.mqttPassword ?? ''} onChangeText={(text) => updateSyncField('mqttPassword', text)} placeholder="Password" placeholderTextColor={colors.subText} style={dynamicStyles.input} secureTextEntry autoCapitalize="none" autoCorrect={false} />
-              
-              <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={dynamicStyles.formLabel}>WS 路径</Text>
-                  <TextInput value={syncSettings?.mqttWsPath ?? '/mqtt'} onChangeText={(text) => updateSyncField('mqttWsPath', text)} placeholder="/mqtt" placeholderTextColor={colors.subText} style={dynamicStyles.input} autoCapitalize="none" autoCorrect={false} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Text style={dynamicStyles.formLabel}>客户端 ID</Text>
-                    <TouchableOpacity onPress={() => {
-                        triggerHaptic();
-                        updateSyncField('mqttClientId', `tiez_mobile_${Math.random().toString(36).substring(2, 10)}`);
-                    }} style={{ marginBottom: 8, paddingHorizontal: 4 }}>
-                      <Feather name="refresh-cw" size={12} color={colors.primary} />
-                    </TouchableOpacity>
-                  </View>
-                  <TextInput value={syncSettings?.mqttClientId ?? ''} onChangeText={(text) => updateSyncField('mqttClientId', text)} placeholder="Mobile-Device" placeholderTextColor={colors.subText} style={dynamicStyles.input} autoCapitalize="none" autoCorrect={false} />
-                </View>
-              </View>
-
-
-              <Text style={dynamicStyles.formLabel}>推送主题 (Topic)</Text>
-              <TextInput value={syncSettings?.mqttTopic ?? ''} onChangeText={(text) => updateSyncField('mqttTopic', text)} placeholder="tiez/your-unique-topic" placeholderTextColor={colors.subText} style={dynamicStyles.input} autoCapitalize="none" autoCorrect={false} />
-              {syncSettings?.mqttProtocol === 'ws://' && (
-                <Text style={{ color: '#d97706', fontSize: 12, lineHeight: 18, marginBottom: 10 }}>
-                  当前连接未加密。功能仍可使用，但用户名、密码和剪贴板内容可能被同一网络中的设备看到，建议优先使用 WSS。
-                </Text>
-              )}
-              
-              <TouchableOpacity style={dynamicStyles.saveButton} activeOpacity={0.8} onPress={saveCurrentSyncSettings}>
-                <Text style={dynamicStyles.saveButtonText}>{isSavingSyncSettings ? '保存中...' : '保存 MQTT 配置'}</Text>
-              </TouchableOpacity>
-              <View style={{ height: 12 }} />
-            </View>
-          )}
-
-          <View style={dynamicStyles.divider} />
-
           <TouchableOpacity style={[styles.row, { paddingVertical: 18 }]} activeOpacity={0.7} onPress={toggleWebDAV}>
             <View style={dynamicStyles.iconBox}>
               <Feather name="server" size={18} color={colors.text} />
@@ -650,7 +497,7 @@ export default function SettingsScreen() {
             <View style={dynamicStyles.iconBox}>
               <Feather name="clock" size={18} color={colors.text} />
             </View>
-            <Text style={dynamicStyles.rowText}>拉取剪贴板最近数量</Text>
+            <Text style={dynamicStyles.rowText}>WebDAV 最近数量（Plus 固定 50）</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.iconBackground, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
               <TextInput
                 value={String(syncSettings?.recentLimit ?? 10)}

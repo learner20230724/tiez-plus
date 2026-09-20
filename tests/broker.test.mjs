@@ -44,3 +44,25 @@ test('occupied TCP port falls back without terminating the owner',async t=>{
   const dir=await mkdtemp(path.resolve('.runtime/test-port-'));const server=await createBroker({dataDir:dir,tcpPort:port,webPort:0,host:'127.0.0.1',discovery:false});
   t.after(async()=>{await server.close();await rm(dir,{recursive:true,force:true});});assert.notEqual(server.info().mqttPort,port);assert(existing.listening);
 });
+
+
+test('malformed UTF-8 credentials cannot crash broker; reserved desktop ID cannot be enrolled by phone',async t=>{
+  const s=await setup(t);const d=await s.enroll('mobile');
+  const bad=mqtt.connect(`mqtt://127.0.0.1:${s.endpoint.mqttPort}`,{clientId:d.deviceId,username:d.deviceId,password:'秘密'.repeat(32),reconnectPeriod:0});
+  s.clients.push(bad);
+  await new Promise(resolve=>bad.once('error',resolve));bad.end(true);
+  const r=await fetch(`http://127.0.0.1:${s.endpoint.httpPort}/api/v1/enroll`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:'mobile',deviceId:s.endpoint.desktopId})});
+  assert.equal(r.status,400);
+  const good=await s.mobile();assert(good.connected);
+});
+
+test('UDP discovery returns matching nonce and connection metadata, never a token or body',async t=>{
+  const {default:dgram}=await import('node:dgram');
+  const dir=await mkdtemp(path.resolve('.runtime/test-discovery-'));
+  const server=await createBroker({dataDir:dir,host:'127.0.0.1',tcpPort:0,webPort:0,udpPort:0,mdns:false});
+  const client=dgram.createSocket('udp4');
+  t.after(async()=>{client.close();await server.close();await rm(dir,{recursive:true,force:true});});
+  const answer=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('UDP reply timeout')),3000);client.once('message',bytes=>{clearTimeout(timeout);resolve(JSON.parse(bytes));});});
+  client.send(JSON.stringify({type:'tiezplus.discover',v:1,nonce:'test-nonce'}),server.discoveryPort(),'127.0.0.1');
+  const info=await answer;assert.equal(info.nonce,'test-nonce');assert.equal(info.instanceId,server.info().instanceId);assert.equal(info.httpPort,server.info().httpPort);assert(!('token' in info));assert(!('content' in info));
+});

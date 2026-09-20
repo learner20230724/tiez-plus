@@ -2,23 +2,36 @@ param([switch]$PrepareOnly)
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 & (Join-Path $PSScriptRoot 'prepare-android.ps1')
+& (Join-Path $PSScriptRoot 'prepare-node.ps1')
 # Android's CMake toolchain requires an ASCII, space-free path. Map only our new project.
 $letter = @('R','S','T','U','V','W','X','Y','Z') | Where-Object { -not (Test-Path ($_ + ':\')) } | Select-Object -First 1
 if (-not $letter) { throw 'No unused drive letter for isolated Android build' }
 & subst.exe ($letter + ':') $root
 if ($LASTEXITCODE -ne 0) { throw 'Unable to map isolated Android build directory' }
 $mapped = $letter + ':\'
-$old = @{ JAVA_HOME=$env:JAVA_HOME; ANDROID_HOME=$env:ANDROID_HOME; ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT; GRADLE_USER_HOME=$env:GRADLE_USER_HOME; PATH=$env:PATH; CI=$env:CI }
+$old = @{ JAVA_HOME=$env:JAVA_HOME; ANDROID_HOME=$env:ANDROID_HOME; ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT; GRADLE_USER_HOME=$env:GRADLE_USER_HOME; PATH=$env:PATH; CI=$env:CI; JAVA_OPTS=$env:JAVA_OPTS; EXPO_NO_TELEMETRY=$env:EXPO_NO_TELEMETRY; TEMP=$env:TEMP; TMP=$env:TMP }
 try {
+  $env:TEMP = Join-Path $mapped '.runtime\android-temp'; $env:TMP = $env:TEMP
+  New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
   $env:JAVA_HOME = Join-Path $mapped '.runtime\jdk17'
   $env:ANDROID_HOME = Join-Path $mapped '.runtime\android-sdk'
   $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
   $env:GRADLE_USER_HOME = Join-Path $mapped '.runtime\gradle-home'
-  $env:PATH = (Join-Path $env:JAVA_HOME 'bin') + ';' + $env:PATH
-  $manager = Join-Path $env:ANDROID_HOME 'cmdline-tools\latest\bin\sdkmanager.bat'
+  $env:PATH = (Join-Path $mapped '.runtime\node22') + ';' + (Join-Path $env:JAVA_HOME 'bin') + ';' + $env:PATH
+  $manager = Join-Path $env:ANDROID_HOME 'cmdline-tools\19.0\bin\sdkmanager.bat'
+  $proxyArgs = @()
+  if ($env:HTTPS_PROXY) {
+    $proxy = [uri]$env:HTTPS_PROXY
+    if ($proxy.Scheme -eq 'http') {
+      $proxyArgs = @('--proxy=http',"--proxy_host=$($proxy.Host)","--proxy_port=$($proxy.Port)")
+      $env:JAVA_OPTS = "$env:JAVA_OPTS -Dhttp.proxyHost=$($proxy.Host) -Dhttp.proxyPort=$($proxy.Port) -Dhttps.proxyHost=$($proxy.Host) -Dhttps.proxyPort=$($proxy.Port)"
+      New-Item -ItemType Directory -Force -Path $env:GRADLE_USER_HOME | Out-Null
+      @("systemProp.http.proxyHost=$($proxy.Host)","systemProp.http.proxyPort=$($proxy.Port)","systemProp.https.proxyHost=$($proxy.Host)","systemProp.https.proxyPort=$($proxy.Port)",'systemProp.http.nonProxyHosts=localhost|127.*') | Set-Content -LiteralPath (Join-Path $env:GRADLE_USER_HOME 'gradle.properties') -Encoding ascii
+    }
+  }
   # Licenses apply only to the private SDK used to build this requested APK.
-  (1..100 | ForEach-Object { 'y' }) | & $manager "--sdk_root=$env:ANDROID_HOME" --licenses
-  & $manager "--sdk_root=$env:ANDROID_HOME" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+  (1..100 | ForEach-Object { 'y' }) | & $manager @proxyArgs "--sdk_root=$env:ANDROID_HOME" --licenses
+  & $manager @proxyArgs "--sdk_root=$env:ANDROID_HOME" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
   if ($LASTEXITCODE -ne 0) { throw 'Private Android SDK package installation failed' }
   if ($PrepareOnly) { return }
   $secrets = Join-Path $mapped '.secrets'
@@ -37,10 +50,10 @@ try {
     & (Join-Path $env:JAVA_HOME 'bin\keytool.exe') -genkeypair -keystore $env:TIEZ_PLUS_KEYSTORE -storetype PKCS12 -storepass:env TIEZ_PLUS_STORE_PASSWORD -keypass:env TIEZ_PLUS_STORE_PASSWORD -alias tiez-plus -keyalg RSA -keysize 4096 -validity 10000 -dname 'CN=TIEZ Plus, OU=Personal Software, O=TIEZ Plus'
     if ($LASTEXITCODE -ne 0) { throw 'Independent APK signing key creation failed' }
   }
-  $env:CI = '1'
+  $env:CI = '1'; $env:EXPO_NO_TELEMETRY = '1'
   Push-Location (Join-Path $mapped 'apps\mobile')
   try {
-    & npx.cmd expo prebuild --platform android --no-install
+    & node.exe node_modules/expo/bin/cli prebuild --platform android --no-install
     if ($LASTEXITCODE -ne 0) { throw 'Expo prebuild failed' }
     Push-Location android
     try {

@@ -40,7 +40,7 @@ pub fn is_text_type(content_type: &str) -> bool {
 }
 
 fn normalize_text(content: &str) -> String {
-    content.trim().replace("\r\n", "\n")
+    content.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 pub fn calc_text_hash(content: &str) -> u64 {
@@ -341,7 +341,7 @@ pub fn seed_defaults(conn: &Connection) -> Result<()> {
         [],
     );
     let _ = conn.execute(
-        "INSERT OR IGNORE INTO settings (key, value) VALUES ('file_server_port', '12345')",
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('file_server_port', '18085')",
         [],
     );
 

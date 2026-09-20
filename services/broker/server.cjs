@@ -105,8 +105,9 @@ async function createBroker(options = {}) {
       const role = input.role === 'desktop' ? 'desktop' : 'mobile';
       if (role === 'desktop' && !loopback(req.socket.remoteAddress)) return reply(403, { error: 'DESKTOP_LOCAL_ONLY' });
       const id = role === 'desktop' ? state.desktopId : input.deviceId;
-      if (!P.validId(id)) return reply(400, { error: 'INVALID_ID' });
+      if (!P.validId(id) || (role !== 'desktop' && id === state.desktopId)) return reply(400, { error: 'INVALID_ID' });
       const old = state.devices[id];
+      if (old && old.role !== role) return reply(403, { error: 'INVALID_ROLE' });
       if (old && (role === 'desktop' || input.token === old.token)) return reply(200, { ...info(), deviceId: id, token: old.token, role });
       if (old) return reply(409, { error: 'DEVICE_ALREADY_ENROLLED' });
       const ip = req.socket.remoteAddress;
@@ -138,17 +139,17 @@ async function createBroker(options = {}) {
     if (bonjour && key) advertisement = bonjour.publish({ name: `TIEZ Plus ${name} ${state.instanceId.slice(0, 8)}`, type: 'tiezplus', port: webPort, txt: { v: '1', instanceId: state.instanceId, desktopId: state.desktopId } });
   };
   if (options.discovery !== false) {
-    bonjour = new Bonjour(undefined, () => {}); advertise();
+    if (options.mdns !== false) { bonjour = new Bonjour(undefined, () => {}); advertise(); }
     udp = dgram.createSocket('udp4');
     udp.on('error', () => {}); // mDNS remains available if discovery port is occupied.
     udp.on('message', (bytes, remote) => {
       if (!localAddress(remote.address) || bytes.length > 512) return;
       try { const m = JSON.parse(bytes.toString()); if (m.type === 'tiezplus.discover' && m.v === 1 && P.validId(m.nonce)) udp.send(JSON.stringify({ ...info(), nonce: m.nonce }), remote.port, remote.address); } catch {}
     });
-    udp.bind(options.udpPort ?? 18084, host);
+    await new Promise(resolve => { udp.once('listening', resolve); udp.once('error', resolve); udp.bind(options.udpPort ?? 18084, host); });
   }
   const interval = setInterval(() => { advertise(); enrollRate.clear(); }, 30000); interval.unref();
-  return { info, broker, async close() {
+  return { info, broker, discoveryPort() { try { return udp?.address().port || 0; } catch { return 0; } }, async close() {
     if (closed) return; closed = true; clearInterval(interval);
     advertisement?.stop(); bonjour?.destroy();
     try { udp?.close(); } catch {}

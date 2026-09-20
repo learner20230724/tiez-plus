@@ -34,5 +34,6 @@ Get-NetFirewallRule -Group 'TIEZ Plus' -ErrorAction SilentlyContinue | Remove-Ne
 # Program-limited rule supports automatically selected TCP fallback ports. Private profile + local subnet only.
 New-NetFirewallRule -DisplayName 'TIEZ Plus LAN TCP' -Group 'TIEZ Plus' -Direction Inbound -Action Allow -Profile Private -Program $node -Protocol TCP -RemoteAddress LocalSubnet | Out-Null
 New-NetFirewallRule -DisplayName 'TIEZ Plus Discovery UDP' -Group 'TIEZ Plus' -Direction Inbound -Action Allow -Profile Private -Program $node -Protocol UDP -LocalPort 5353,18084 -RemoteAddress LocalSubnet | Out-Null
+New-NetFirewallRule -DisplayName 'TIEZ Plus File Transfer' -Group 'TIEZ Plus' -Direction Inbound -Action Allow -Profile Private -Program (Join-Path $InstallDir 'tiez-plus.exe') -Protocol TCP -RemoteAddress LocalSubnet | Out-Null
 Start-Service -Name 'TiezPlusBroker'
 Write-Output 'Installed TiezPlusBroker. Existing TieZ services and applications were not touched.'

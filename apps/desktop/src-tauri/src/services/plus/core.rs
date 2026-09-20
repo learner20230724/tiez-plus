@@ -48,7 +48,10 @@ pub fn stage(conn: &Connection, r: &Request, encrypted_original: &str, save: imp
         Ok(Receipt { status:"stored".into(), entry_id })
     })();
     match result {
-        Ok(value) => { conn.execute_batch("COMMIT").map_err(|e|e.to_string())?; Ok(value) },
+        Ok(value) => {
+            if let Err(error) = conn.execute_batch("COMMIT") { let _ = conn.execute_batch("ROLLBACK"); return Err(error.to_string()); }
+            Ok(value)
+        },
         Err(error) => { let _ = conn.execute_batch("ROLLBACK"); Err(error) }
     }
 }

@@ -24,7 +24,7 @@
             "UIApplicationShortcutItemTitle": "文件传输",
             "UIApplicationShortcutItemIconType": "UIApplicationShortcutIconTypeCaptureVideo",
             "UIApplicationShortcutItemUserInfo": {
-              "url": "tiez://scanner"
+              "url": "tiezplus://scanner"
             }
           },
           {
@@ -32,7 +32,7 @@
             "UIApplicationShortcutItemTitle": "获取 PC 内容",
             "UIApplicationShortcutItemIconType": "UIApplicationShortcutIconTypeCloudDownload",
             "UIApplicationShortcutItemUserInfo": {
-              "url": "tiez://sync-pull"
+              "url": "tiezplus://sync-pull"
             }
           },
           {
@@ -40,7 +40,7 @@
             "UIApplicationShortcutItemTitle": "同步到 PC",
             "UIApplicationShortcutItemIconType": "UIApplicationShortcutIconTypeShare",
             "UIApplicationShortcutItemUserInfo": {
-              "url": "tiez://sync-push"
+              "url": "tiezplus://sync-push"
             }
           }
         ]
@@ -73,8 +73,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "允许 TieZ 使用相机进行扫码、拍照和录像。",
-          "microphonePermission": "允许 TieZ 使用麦克风录制视频声音。"
+          "cameraPermission": "允许 TIEZ Plus 使用相机进行扫码、拍照和录像。",
+          "microphonePermission": "允许 TIEZ Plus 使用麦克风录制视频声音。"
         }
       ],
       "expo-video",

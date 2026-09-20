@@ -286,10 +286,14 @@ const SettingsFooter = ({
                     justifyContent: 'center',
                     gap: '8px'
                 }}>
-                    <span>TieZ {appVersion ? `v${appVersion}` : "v0.2.0"}</span>
+                    <span>TIEZ Plus {appVersion ? `v${appVersion}` : "v0.1.0"}</span>
                     <button
                         onClick={async () => {
                             if (updateStatus) return;
+                            if (!import.meta.env.VITE_PLUS_UPDATES) {
+                                setUpdateStatus('Plus 使用独立安装包更新');
+                                setTimeout(() => setUpdateStatus(''), 3000); return;
+                            }
                             setUpdateStatus(t('checking'));
                             try {
                                 const update = import.meta.env.VITE_PLUS_UPDATES ? await check() : null;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigation } from '@react-navigation/native';
 import { 
   StyleSheet, 
   Text, 
@@ -91,7 +92,7 @@ export default function ScannerScreen() {
   const [isConnecting, setIsConnecting] = useState(true);
   
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
+  const navigation = useNavigation<any>();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0); // 0-1
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -371,42 +372,6 @@ export default function ScannerScreen() {
     ws.current?.close();
     ws.current = null;
   }
-
-  const sendMessage = async () => {
-    if (!inputText.trim() || !connection) return;
-    const text = inputText.trim();
-    setInputText('');
-    
-    // 乐观UI：立即显示
-    const tempId = Date.now();
-    const optimisticMsg: Message = {
-      id: tempId,
-      direction: 'in',
-      msg_type: 'text',
-      content: text,
-      timestamp: tempId,
-      sender_id: deviceId,
-      sender_name: '手机端',
-      isOptimistic: true
-    };
-    setMessages(prev => [...prev, optimisticMsg]);
-    triggerHaptic();
-
-    try {
-      const response = await fetch(buildTransferUrl(connection, '/send_text'), {
-        method: 'POST',
-        headers: buildTransferHeaders(connection, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ content: text, sender_id: deviceId, sender_name: '手机端' }),
-      });
-      if (!response.ok) {
-        const message = await response.text().catch(() => '');
-        throw new Error(message || `Send failed with status ${response.status}`);
-      }
-    } catch (e) {
-      setMessages(prev => prev.filter(m => m.id !== tempId));
-      Alert.alert('发送失败', '请检查局域网连接');
-    }
-  };
 
   const handlePlusPress = () => {
     Keyboard.dismiss();
@@ -940,12 +905,11 @@ export default function ScannerScreen() {
               <TouchableOpacity style={styles.plusBtn} onPress={handlePlusPress} disabled={isUploading}>
                 {isUploading ? <ActivityIndicator size="small" color={colors.text} /> : <Feather name="plus" size={24} color={colors.text} />}
               </TouchableOpacity>
-              <TextInput
-                style={styles.input} placeholder="输入内容..." placeholderTextColor={colors.subText}
-                value={inputText} onChangeText={setInputText} multiline onFocus={() => setIsPlusMenuOpen(false)}
-              />
-              <TouchableOpacity style={[styles.sendBtn, { opacity: inputText.trim().length > 0 ? 1 : 0.4 }]} onPress={sendMessage} disabled={inputText.trim().length === 0}>
-                <Feather name="send" size={20} color={colors.primaryText} />
+              <TouchableOpacity style={[styles.input, {justifyContent: 'center'}]} onPress={() => navigation.navigate('Home')}>
+                <Text style={{color: colors.subText}}>文字请到「同步」发送：自动保存、电脑回执</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.sendBtn} onPress={() => navigation.navigate('Home')}>
+                <Feather name="arrow-right" size={20} color={colors.primaryText} />
               </TouchableOpacity>
             </View>
 

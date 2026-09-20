@@ -20,3 +20,7 @@ pub fn run() {
 #[cfg(test)]
 #[path = "services/plus/core.rs"]
 mod plus_core_tests;
+
+#[cfg(test)]
+#[path = "services/file_transfer/security.rs"]
+mod plus_transfer_security_tests;

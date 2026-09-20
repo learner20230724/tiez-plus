@@ -18,12 +18,19 @@ $download = Join-Path $root '.runtime\nssm.zip'
 if (-not (Test-Path -LiteralPath (Join-Path $stage 'nssm.exe'))) {
   & curl.exe -fL --retry 3 --output $download 'https://nssm.cc/release/nssm-2.24.zip'
   if ($LASTEXITCODE -ne 0) { throw 'NSSM download failed' }
-  # Fixed upstream release checksum is validated against the initially recorded distribution manifest.
+  # Pin the reviewed 2.24 archive; changed bytes require an explicit source review.
+  if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne '727D1E42275C605E0F04ABA98095C38A8E1E46DEF453CDFFCE42869428AA6743') { throw 'NSSM archive checksum mismatch' }
   $unpack = Join-Path $root '.runtime\nssm-download'
   Expand-Archive -LiteralPath $download -DestinationPath $unpack -Force
   Copy-Item -LiteralPath (Join-Path $unpack 'nssm-2.24\win64\nssm.exe') -Destination (Join-Path $stage 'nssm.exe') -Force
 }
-$hashes = Get-ChildItem -LiteralPath $stage -File | Get-FileHash -Algorithm SHA256 | Select-Object @{n='file';e={Split-Path -Leaf $_.Path}},Hash
+if ((Get-FileHash -LiteralPath (Join-Path $stage 'nssm.exe') -Algorithm SHA256).Hash -ne 'F689EE9AF94B00E9E3F0BB072B34CAAF207F32DCB4F5782FC9CA351DF9A06C97') { throw 'NSSM executable checksum mismatch' }
+$nodeVersion = (& $node --version).Trim()
+& curl.exe -fL --retry 3 --output (Join-Path $stage 'NODE-LICENSE.txt') "https://raw.githubusercontent.com/nodejs/node/$nodeVersion/LICENSE"
+if ($LASTEXITCODE -ne 0) { throw 'Node distribution license download failed' }
+Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $stage 'TIEZ-PLUS-LICENSE.txt') -Force
+'NSSM 2.24 - https://nssm.cc/ - Public domain software. Upstream licenses in each node_modules package remain included.' | Set-Content -LiteralPath (Join-Path $stage 'THIRD-PARTY.txt')
+$hashes = Get-ChildItem -LiteralPath $stage -File | Where-Object Name -ne "RUNTIME-CHECKSUMS.json" | Get-FileHash -Algorithm SHA256 | Select-Object @{n='file';e={Split-Path -Leaf $_.Path}},Hash
 $hashes | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'RUNTIME-CHECKSUMS.json') -Encoding utf8
 if (-not $SkipBuild) {
   Push-Location (Join-Path $root 'apps\desktop')

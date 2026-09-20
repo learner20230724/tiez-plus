@@ -596,6 +596,11 @@ fn clamp_window_rect_to_monitor(rect: WindowRect, monitor: &tauri::Monitor) -> (
 
 fn start_services(app: &App, s: &StartupSettings, app_handle: AppHandle) {
     if crate::services::plus::sandbox() { return; }
+    // First explicit Plus launch enables only the current user's independent Plus login entry.
+    let plus_repo = &app.state::<DbState>().settings_repo;
+    if plus_repo.get("plus.autostart_initialized").ok().flatten().is_none() {
+        if crate::app::commands::toggle_autostart(true).is_ok() { let _ = plus_repo.set("plus.autostart_initialized", "true"); }
+    }
     crate::services::plus::start(app_handle.clone());
     crate::infrastructure::windows_api::window_tracker::start_window_tracking(app_handle.clone());
     crate::services::clipboard::start_clipboard_monitor(app_handle.clone());
@@ -939,58 +944,19 @@ fn start_edge_docking_monitor(app_handle: AppHandle) {
 #[cfg(not(target_os = "windows"))]
 fn start_edge_docking_monitor(_app_handle: AppHandle) {}
 
-fn init_announcement_ping(app: &App, repo: &impl SettingsRepository) {
-    let machine_id = crate::app::system::get_machine_id();
-    let stored_anon_id = repo.get("app.anon_id").unwrap_or(None);
-    let anon_id = stored_anon_id
-        .as_deref()
-        .and_then(crate::app::system::normalize_anon_id)
-        .unwrap_or_else(|| crate::app::system::build_anon_id(&machine_id));
-
-    if stored_anon_id
-        .as_deref()
-        .map(|value| value.trim() != anon_id)
-        .unwrap_or(true)
-    {
-        let _ = repo.set("app.anon_id", &anon_id);
-    }
-
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    if repo.get("app.last_ping_date").unwrap_or(None).as_deref() != Some(&today) {
-        let _ = repo.set("app.last_ping_date", &today);
-        let version = app.package_info().version.to_string();
-        if let Ok(base_url) = std::env::var("TIEZ_ANNOUNCEMENT_PING_URL") {
-            let base_url = base_url.trim().to_string();
-            if !base_url.is_empty() {
-                std::thread::spawn(move || {
-                    let sep = if base_url.contains('?') { "&" } else { "?" };
-                    let ping_url = format!(
-                        "{}{}v={}&id={}",
-                        base_url,
-                        sep,
-                        urlencoding::encode(&version),
-                        urlencoding::encode(&anon_id)
-                    );
-                    let _ = reqwest::blocking::get(ping_url);
-                });
-            }
-        }
-    }
-}
-
 fn setup_tray(app: &App, hide_tray: bool) {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 
     let show_i = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>).unwrap();
-    let quit_i = MenuItem::with_id(app, "quit", "退出 贴汁", true, None::<&str>).unwrap();
+    let quit_i = MenuItem::with_id(app, "quit", "退出 TIEZ Plus", true, None::<&str>).unwrap();
     let menu = Menu::with_items(app, &[&show_i, &quit_i]).unwrap();
     let icon =
         tauri::image::Image::from_bytes(include_bytes!("../../icons/tray-icon.png")).unwrap();
 
     let tray = TrayIconBuilder::with_id("main_tray")
         .icon(icon)
-        .tooltip("TieZ")
+        .tooltip("TIEZ Plus")
         .show_menu_on_left_click(false)
         .menu(&menu)
         .on_menu_event(|app, event| {
