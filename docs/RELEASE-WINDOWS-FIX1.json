@@ -1,0 +1,15 @@
+{
+  "appVersion": "0.1.0",
+  "packagingRevision": "windows-installer-fix1",
+  "installerSourceCommit": "761636553477d68739459fd0fdd37c27828c61bf",
+  "applicationSourceCommit": "1bd514924b4cf7e4b309f938bfefd5df22d43db1",
+  "builtAt": "2026-09-20T23:19:00.4812295+08:00",
+  "file": "TIEZ Plus_0.1.0_x64-setup-fix1.exe",
+  "bytes": 29250154,
+  "sha256": "e6fcbb0a96da891f6afead6f58ad41345f9eb6e6e4aebfb26b68f78a251ba7a8",
+  "nodeTestsPassed": 33,
+  "installerRegressionTestsPassed": 8,
+  "nsisPowerShellSmoke": "passed with mocked services",
+  "realInstallationPerformed": false,
+  "androidApkChanged": false
+}
