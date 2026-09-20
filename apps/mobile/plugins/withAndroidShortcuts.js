@@ -12,19 +12,19 @@ const DEFAULT_SHORTCUTS = [
     id: 'scanner',
     shortLabel: '文件传输',
     longLabel: '开启文件快传',
-    data: 'tiez://scanner',
+    data: 'tiezplus://scanner',
   },
   {
     id: 'pull',
     shortLabel: '获取内容',
     longLabel: '获取 PC 端内容',
-    data: 'tiez://sync-pull',
+    data: 'tiezplus://sync-pull',
   },
   {
     id: 'push',
     shortLabel: '同步内容',
     longLabel: '同步剪贴板到 PC',
-    data: 'tiez://sync-push',
+    data: 'tiezplus://sync-push',
   },
 ];
 

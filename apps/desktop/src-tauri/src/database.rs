@@ -306,7 +306,7 @@ pub fn seed_defaults(conn: &Connection) -> Result<()> {
         [],
     );
     let _ = conn.execute(
-        "INSERT OR IGNORE INTO settings (key, value) VALUES ('app.hotkey', 'Alt+C')",
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('app.hotkey', 'Ctrl+Alt+Shift+V')",
         [],
     );
     let _ = conn.execute(

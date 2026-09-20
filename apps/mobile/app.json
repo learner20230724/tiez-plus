@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "TieZ",
-    "slug": "tiez-mobile",
-    "version": "1.0.1",
-    "scheme": "tiez",
+    "name": "TIEZ Plus",
+    "slug": "tiez-plus",
+    "version": "0.1.0",
+    "scheme": "tiezplus",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.jimuzhe.tiez",
+      "bundleIdentifier": "io.github.learner20230724.tiezplus",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIApplicationShortcutItems": [
@@ -47,7 +47,7 @@
       }
     },
     "android": {
-      "package": "com.jimuzhe.tiez",
+      "package": "io.github.learner20230724.tiezplus",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon-android.png",
         "backgroundColor": "#ffffff"
@@ -57,8 +57,13 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+      ],
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -79,7 +84,9 @@
         "expo-build-properties",
         {
           "android": {
-            "abiFilters": ["arm64-v8a"],
+            "abiFilters": [
+              "arm64-v8a"
+            ],
             "usesCleartextTraffic": true,
             "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true
@@ -87,13 +94,10 @@
         }
       ],
       "expo-secure-store",
-      "expo-font"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "4fb696a2-b323-4752-b8bc-f6d165989cbd"
-      }
-    },
-    "owner": "longdanzi"
+      "expo-font",
+      "expo-sqlite",
+      "./plugins/withPlusDiscovery",
+      "./plugins/withPlusSigning"
+    ]
   }
 }

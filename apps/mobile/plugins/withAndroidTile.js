@@ -38,8 +38,8 @@ const withAndroidTile = (config) => {
   config = withDangerousMod(config, [
     'android',
     async (config) => {
-      const packagePath = 'com/jimuzhe/tiez';
-      const javaFileContent = `package com.jimuzhe.tiez;
+      const packagePath = 'io/github/learner20230724/tiezplus';
+      const javaFileContent = `package io.github.learner20230724.tiezplus;
 import android.content.Intent;
 import android.net.Uri;
 import android.service.quicksettings.TileService;
@@ -47,7 +47,7 @@ import android.service.quicksettings.TileService;
 public class TiezTileService extends TileService {
     @Override
     public void onClick() {
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("tiez://sync-now"));
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("tiezplus://sync-now"));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         try {
             startActivityAndCollapse(intent);

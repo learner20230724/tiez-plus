@@ -100,7 +100,7 @@ pub fn init(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
     // 10. Win32 Hook Initialization
     #[cfg(target_os = "windows")]
-    init_win32_hooks(app);
+    if !crate::services::plus::sandbox() { init_win32_hooks(app); }
 
     // 11. TaskbarCreated & Subclass
     #[cfg(target_os = "windows")]
@@ -112,23 +112,7 @@ pub fn init(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 fn resolve_data_dir(app: &App) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     let default_app_dir = app.path().app_data_dir()?;
 
-    // Perform migration if needed
-    crate::migration::perform_migration_v028(&default_app_dir);
-
-    // Cleanup temp files
-    std::thread::spawn(|| {
-        let temp_dir = std::env::temp_dir();
-        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
-            for entry in entries.flatten() {
-                if let Ok(name) = entry.file_name().into_string() {
-                    if name.starts_with("TieZ_Clip_") {
-                        let _ = std::fs::remove_file(entry.path());
-                    }
-                }
-            }
-        }
-    });
-
+    // Plus never migrates old data or cleans the old app's temp files.
     let redirect_file = default_app_dir.join("datapath.txt");
     let mut app_dir = if redirect_file.exists() {
         if let Ok(content) = std::fs::read_to_string(&redirect_file) {
@@ -148,7 +132,7 @@ fn resolve_data_dir(app: &App) -> Result<std::path::PathBuf, Box<dyn std::error:
     // Portable mode check
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            let portable_data = exe_dir.join("data");
+            let portable_data = exe_dir.join("plus-data");
             if portable_data.exists() && portable_data.is_dir() {
                 app_dir = portable_data;
             }
@@ -611,9 +595,11 @@ fn clamp_window_rect_to_monitor(rect: WindowRect, monitor: &tauri::Monitor) -> (
 }
 
 fn start_services(app: &App, s: &StartupSettings, app_handle: AppHandle) {
+    if crate::services::plus::sandbox() { return; }
+    crate::services::plus::start(app_handle.clone());
     crate::infrastructure::windows_api::window_tracker::start_window_tracking(app_handle.clone());
     crate::services::clipboard::start_clipboard_monitor(app_handle.clone());
-    crate::services::mqtt_sub::start_mqtt_client(app_handle.clone());
+    // Legacy MQTT is available in settings but never started by default.
     crate::services::cloud_sync::start_cloud_sync_client(app_handle.clone());
     start_edge_docking_monitor(app_handle.clone());
 
@@ -637,7 +623,7 @@ fn start_services(app: &App, s: &StartupSettings, app_handle: AppHandle) {
     }
 
     // Daily app announcement ping
-    init_announcement_ping(app, &db_state.settings_repo);
+    // No upstream telemetry in Plus.
 
     // Register active hotkeys based on current settings.
     let _ = crate::app::commands::register_hotkey(app_handle.clone(), s.main_hotkey.clone());

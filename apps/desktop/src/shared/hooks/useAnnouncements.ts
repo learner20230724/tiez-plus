@@ -70,6 +70,7 @@ export function useAnnouncements() {
 
   useEffect(() => {
     const fetchAnnouncements = async () => {
+      if (!import.meta.env.VITE_PLUS_ANNOUNCEMENTS) { setLoading(false); return; }
       try {
         // Get device ID (optional, using stored random ID or generating one)
         let deviceId = localStorage.getItem("device_id");

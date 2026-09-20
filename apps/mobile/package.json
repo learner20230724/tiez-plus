@@ -1,6 +1,6 @@
 {
-  "name": "tiez-mobile",
-  "version": "1.0.1",
+  "name": "tiez-plus-mobile",
+  "version": "0.1.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -11,7 +11,8 @@
     "release:stable:android": "node scripts/build-release.mjs android stable",
     "release:stable:ios": "node scripts/build-release.mjs ios stable",
     "release:beta:android": "node scripts/build-release.mjs android beta",
-    "release:beta:ios": "node scripts/build-release.mjs ios beta"
+    "release:beta:ios": "node scripts/build-release.mjs ios beta",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -49,7 +50,8 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-web": "^0.21.0",
-    "react-native-webview": "13.15.0"
+    "react-native-webview": "13.15.0",
+    "expo-sqlite": "~16.0.10"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

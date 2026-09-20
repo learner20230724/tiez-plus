@@ -5866,8 +5866,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "tiez-app"
-version = "0.3.3"
+name = "tiez-plus"
+version = "0.1.0"
 dependencies = [
  "arboard",
  "axum",

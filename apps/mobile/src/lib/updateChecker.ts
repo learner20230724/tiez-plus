@@ -16,7 +16,7 @@ export interface ReleaseInfo {
   checksumSha256?: string;
 }
 
-const DEFAULT_UPDATE_ENDPOINT = 'https://tiez.name666.top/api/v1/latest-version';
+const DEFAULT_UPDATE_ENDPOINT = ''; // Plus never contacts upstream update services
 const REQUEST_TIMEOUT_MS = 12_000;
 const AUTO_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const LAST_AUTO_CHECK_KEY = 'tiez:last-auto-update-check';
@@ -53,6 +53,7 @@ function buildUpdateUrl(currentVersion: string): string | null {
   const platformTarget = getUpdateTarget();
   if (!platformTarget) return null;
 
+  if (!UPDATE_ENDPOINT) return null;
   const url = new URL(UPDATE_ENDPOINT);
   url.searchParams.set('target', platformTarget.target);
   if (platformTarget.arch) url.searchParams.set('arch', platformTarget.arch);
@@ -133,6 +134,7 @@ export async function fetchLatestRelease(
  * 检查更新并展示跳转入口。版本比较由后台完成，客户端不限制用户继续使用。
  */
 export async function checkUpdate(manual = false): Promise<boolean> {
+  if (!UPDATE_ENDPOINT) { if (manual) Alert.alert("TIEZ Plus", "此版本使用独立安装包更新，不连接原版更新服务。"); return false; }
   const currentVersion = packageJson.version;
 
   try {

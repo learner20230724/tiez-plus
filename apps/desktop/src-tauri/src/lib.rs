@@ -16,3 +16,7 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+#[path = "services/plus/core.rs"]
+mod plus_core_tests;

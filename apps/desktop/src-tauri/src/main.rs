@@ -50,6 +50,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            services::plus::get_plus_status,
             app::window_manager::toggle_window_cmd,
             app::window_manager::hide_window_cmd,
             app::window_manager::activate_window_focus,

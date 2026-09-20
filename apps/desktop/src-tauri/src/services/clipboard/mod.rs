@@ -1039,6 +1039,7 @@ pub fn start_clipboard_monitor(app_handle: AppHandle) {
 
 pub use pipeline::{ClipboardData, ClipboardPipeline, PipelineContext};
 pub use utils::{
+    contains_sensitive_info,
     attach_rich_image_fallback, attach_rich_named_formats, build_clipboard_text_fingerprint,
     build_entry_preview, derive_rich_text_content, extract_animated_image_data_url_from_html,
     extract_animated_image_data_url_from_text, extract_first_image_data_url_from_html,

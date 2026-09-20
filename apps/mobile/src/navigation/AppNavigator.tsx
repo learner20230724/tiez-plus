@@ -6,7 +6,7 @@ import { BlurView } from 'expo-blur';
 import { Feather } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 
-import HomeScreen from '../screens/HomeScreen';
+import HomeScreen from '../plus/PlusHome';
 import ScannerScreen from '../screens/ScannerScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import { useTheme } from '../theme/ThemeContext';

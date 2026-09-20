@@ -1,0 +1,13 @@
+{
+  "name": "tiez-plus", "version": "0.1.0", "private": true,
+  "scripts": {
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "check:isolation": "node scripts/check-isolation.cjs",
+    "check:mobile": "npm --prefix apps/mobile run typecheck",
+    "build:desktop": "npm --prefix apps/desktop run build",
+    "build:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
+    "build:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps1"
+  },
+  "dependencies": { "aedes": "0.50.0", "ws": "8.18.3", "bonjour-service": "1.3.0", "mqtt": "5.15.1" },
+  "devDependencies": { "tsx": "4.20.6", "typescript": "~5.9.2" }
+}

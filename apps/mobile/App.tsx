@@ -8,6 +8,7 @@ import { checkForUpdatesOnLaunch } from './src/lib/updateChecker';
 
 export default function App() {
   useEffect(() => {
+    // Independent Plus releases only; this check is disabled without an explicit Plus endpoint.
     const timer = setTimeout(() => {
       void checkForUpdatesOnLaunch();
     }, 4000);

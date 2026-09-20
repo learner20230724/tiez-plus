@@ -292,7 +292,7 @@ const SettingsFooter = ({
                             if (updateStatus) return;
                             setUpdateStatus(t('checking'));
                             try {
-                                const update = await check();
+                                const update = import.meta.env.VITE_PLUS_UPDATES ? await check() : null;
                                 if (update) {
                                     setUpdateStatus('');
                                     setPendingUpdate(update);

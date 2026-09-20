@@ -1,0 +1,11 @@
+export const VERSION: number;
+export const MAX_TEXT_BYTES: number;
+export const MAX_PACKET_BYTES: number;
+export const ACK_TIMEOUT_MS: number;
+export const REQUEST_TYPES: string[];
+export function validId(id: unknown): boolean;
+export function textBytes(s: string): number;
+export function validateRequest(m: unknown): any;
+export function requestTopic(instance: string, desktop: string): string;
+export function responseTopic(instance: string, mobile: string): string;
+export function presenceTopic(instance: string, desktop: string): string;

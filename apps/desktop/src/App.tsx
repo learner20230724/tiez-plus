@@ -1,3 +1,4 @@
+import PlusStatus from "./PlusStatus";
 import { useEffect, useMemo, useRef, useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -979,6 +980,7 @@ const App = () => {
     <div
       className="app-container"
     >
+      <PlusStatus />
       <AppHeader
         t={t}
         showSettings={showSettings}
