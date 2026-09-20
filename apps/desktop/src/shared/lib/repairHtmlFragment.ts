@@ -14,9 +14,13 @@ export const isHtmlishTagText = (text: string): boolean => {
   return MISSING_LEADING_TAG_RE.test((text || "").trim());
 };
 
+export const hasRenderableCssRules = (text: string): boolean => {
+  return !!text && text.includes('{') && /(?:^|[;{\s])(?:color|font|background|text-decoration|line-height|letter-spacing|border|mso-font|mso-highlight)\s*:/im.test(text);
+};
+
 export const isOfficeStyleDefinitionText = (text: string): boolean => {
   const normalized = (text || "").replace(/\s+/g, " ").trim();
-  return normalized.length > 24 && OFFICE_STYLE_SIGNAL_RE.test(normalized);
+  return normalized.length > 24 && OFFICE_STYLE_SIGNAL_RE.test(normalized) && !hasRenderableCssRules(normalized);
 };
 
 export const repairHtmlFragment = (html: string): string => {

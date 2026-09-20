@@ -682,3 +682,5 @@ html.theme-acrylic .history-item.compact {
     padding-bottom: 1px !important;
     border-radius: 10px !important;
 }
+
+.history-item.compact .content-preview.rich-text { display: block !important; -webkit-box-orient: unset !important; -webkit-line-clamp: unset !important; line-clamp: unset !important; max-height: 64px; overflow: hidden !important; }

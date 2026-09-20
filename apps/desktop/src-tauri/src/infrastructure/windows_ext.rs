@@ -2,7 +2,7 @@ use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::System::Threading::AttachThreadInput;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_LWIN,
-    VK_RWIN,
+    VK_RWIN, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic,
@@ -37,7 +37,7 @@ impl WindowExt {
         }
     }
 
-    /// 释放 Windows 键（防止开始菜单弹出）
+    /// 释放全部修饰键（移植上游 d499eda，避免粘贴时 Ctrl/Alt/Shift 卡住）
     pub fn release_win_keys() {
         unsafe {
             let dummy_vk = VIRTUAL_KEY(0xFF);
@@ -46,6 +46,9 @@ impl WindowExt {
                 Self::create_key_input(dummy_vk, true),
                 Self::create_key_input(VK_LWIN, true),
                 Self::create_key_input(VK_RWIN, true),
+                Self::create_key_input(VK_CONTROL, true),
+                Self::create_key_input(VK_MENU, true),
+                Self::create_key_input(VK_SHIFT, true),
             ];
             SendInput(&inputs, core::mem::size_of::<INPUT>() as i32);
         }

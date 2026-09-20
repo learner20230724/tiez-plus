@@ -376,3 +376,6 @@
   text-transform: none;
   white-space: nowrap;
 }
+
+/* Upstream 885782d: rich fragments must not inherit WebKit vertical clamping. */
+.content-preview.rich-text, .content-preview.file-preview { display: block; -webkit-box-orient: unset; -webkit-line-clamp: unset; line-clamp: unset; }
