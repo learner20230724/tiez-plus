@@ -1,0 +1,35 @@
+{
+  "sourceCommit": "0a5cd3e779497a967fac0580ace0cb7be78e4385",
+  "recordedAt": "2026-09-25T17:15:33.6000182+08:00",
+  "desktopVersion": "0.1.0",
+  "desktopRevision": "fix4",
+  "androidVersion": "0.1.2",
+  "androidVersionCode": 3,
+  "androidAbi": "arm64-v8a",
+  "androidSignerSha256": "b91168536b754de321972b053749155ba5a20299b1bab8042862c01ff1cac2d5",
+  "nodeTestsPassed": 54,
+  "rustTestsPassed": 6,
+  "originalSourceFilesUnchanged": 304,
+  "desktopUiFixtureChecked": true,
+  "nativeWindowDraggingTested": false,
+  "installedDesktopChanged": false,
+  "installedDesktopRevision": "fix3",
+  "installedFix3PingSamples": 7,
+  "installedFix3ProbeDurationSeconds": 60,
+  "realClipboardTested": false,
+  "phoneInstalledByAgent": false,
+  "artifacts": [
+    {
+      "file": "TIEZ Plus_0.1.0_x64-setup-fix4.exe",
+      "bytes": 29145229,
+      "sha256": "f6d70b70da0b9853cff93a8badb654ea604b7e982dc5c93af668565cafb179a8",
+      "builtAt": "2026-09-25T17:14:51.5807209+08:00"
+    },
+    {
+      "file": "TIEZ-Plus-0.1.2-arm64-v8a.apk",
+      "bytes": 35060356,
+      "sha256": "0c15806e22600326c29046e0ac14ad214536b40e2d5eca03f8cc66824da7aa47",
+      "builtAt": "2026-09-25T17:10:31.6685252+08:00"
+    }
+  ]
+}
