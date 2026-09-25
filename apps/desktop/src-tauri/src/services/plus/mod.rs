@@ -1,8 +1,9 @@
 pub mod core;
+pub mod session;
 use crate::{app_state::{SettingsState,SessionHistory}, database::DbState, domain::models::ClipboardEntry};
 use crate::infrastructure::repository::clipboard_repo::ClipboardRepository;
 use crate::services::clipboard::contains_sensitive_info;
-use rumqttc::{AsyncClient, Event, Incoming, LastWill, MqttOptions, QoS};
+use rumqttc::{LastWill, MqttOptions, QoS};
 use serde_json::{json,Value};
 use std::{sync::{Mutex,OnceLock,atomic::Ordering},time::{Duration,SystemTime,UNIX_EPOCH}};
 use tauri::{AppHandle,Emitter,Manager};
@@ -130,27 +131,23 @@ async fn run(app:AppHandle)->Result<(),String> {
     options.set_clean_session(true);options.set_keep_alive(Duration::from_secs(15));options.set_max_packet_size(core::MAX_TEXT_BYTES*7,core::MAX_TEXT_BYTES*7);
     let presence=format!("tiezplus/v1/{instance}/presence/{desktop}");
     options.set_last_will(LastWill::new(&presence,json!({"v":1,"from":desktop,"ready":false}).to_string(),QoS::AtLeastOnce,true));
-    let(client,mut events)=AsyncClient::new(options,32);
-    let request_topic=format!("tiezplus/v1/{instance}/request/{desktop}");
-    let mut subscribed=false;
-    loop {
-        match events.poll().await.map_err(|_|"Plus 服务连接断开，正在重新连接")? {
-            Event::Incoming(Incoming::ConnAck(_))=>{client.subscribe(&request_topic,QoS::AtLeastOnce).await.map_err(|_|"SUBSCRIBE_FAILED")?;},
-            Event::Incoming(Incoming::SubAck(ack))=>{
-                if ack.return_codes.iter().any(|q|matches!(q,rumqttc::SubscribeReasonCode::Failure)){return Err("SUBSCRIBE_DENIED".into());}
-                subscribed=true;
-                client.publish(&presence,QoS::AtLeastOnce,true,json!({"v":1,"from":desktop,"ready":true}).to_string()).await.map_err(|_|"PRESENCE_FAILED")?;
-                status(&app,json!({"ready":true,"message":"Plus 服务已连接，可接收手机文字","endpoint":{"instanceId":instance,"httpPort":port,"addresses":enrollment["addresses"]}}));
-            },
-            Event::Incoming(Incoming::Publish(packet)) if subscribed && packet.topic==request_topic && !packet.retain=>{
-                let Ok(r)=serde_json::from_slice::<core::Request>(&packet.payload) else {continue};
-                if r.validate(&desktop).is_err(){continue;}
-                let mut response=handle(&app,&r).await.unwrap_or_else(|error|json!({"ok":false,"status":if r.kind=="send_text" {"rejected"}else{"error"},"error":error}));
-                response["v"]=json!(1);response["type"]=json!("response");response["id"]=json!(r.id);response["requestId"]=json!(r.request_id);response["from"]=json!(desktop);response["to"]=json!(r.from);
-                client.publish(format!("tiezplus/v1/{instance}/response/{}",r.from),QoS::AtLeastOnce,false,response.to_string()).await.map_err(|_|"RESPONSE_FAILED")?;
-            },_=>{}
+    let ready_app=app.clone();
+    let handler_app=app.clone();
+    let endpoint=json!({"instanceId":instance,"httpPort":port,"addresses":enrollment["addresses"]});
+    session::serve(options,instance,desktop,move |r| {
+        let app=handler_app.clone();
+        async move {
+            let started=std::time::Instant::now();
+            let result=handle(&app,&r).await.unwrap_or_else(|error|json!({"ok":false,"status":if r.kind=="send_text" {"rejected"}else{"error"},"error":error}));
+            if r.kind != "ping" {
+                crate::info!("[Plus] request={} status={} elapsed_ms={}",r.kind,result["status"].as_str().unwrap_or("response"),started.elapsed().as_millis());
+            }
+            result
         }
-    }
+    },move || {
+        crate::info!("[Plus] MQTT subscribed; background receiver ready");
+        status(&ready_app,json!({"ready":true,"message":"Plus 服务已连接，可在后台接收手机文字","endpoint":endpoint}));
+    }).await
 }
 pub fn start(app:AppHandle) {
     if sandbox(){return;}
@@ -160,7 +157,7 @@ pub fn start(app:AppHandle) {
         if result.is_err(){status(&app,json!({"ready":false,"message":"Plus 送达数据库初始化失败，未启动接收"}));return;}
     }
     tauri::async_runtime::spawn(async move {loop {
-        if let Err(error)=run(app.clone()).await{status(&app,json!({"ready":false,"message":error}));}
+        if let Err(error)=run(app.clone()).await{crate::info!("[Plus] {}",error);status(&app,json!({"ready":false,"message":error}));}
         tokio::time::sleep(Duration::from_secs(5)).await;
     }});
 }

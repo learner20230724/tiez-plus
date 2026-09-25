@@ -190,7 +190,14 @@ fn main() {
     match app {
         Ok(app) => {
             info!(">>> [STARTUP] Tauri app built successfully.");
-            app.run(|_app_handle, _event| {});
+            app.run(|_app_handle, event| {
+                match event {
+                    // Closing/hiding a webview is not an explicit tray-menu Quit.
+                    tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
+                    tauri::RunEvent::ExitRequested { code: Some(code), .. } => info!("[Plus] explicit exit requested code={}", code),
+                    _ => {}
+                }
+            });
         }
         Err(e) => {
             error!(">>> [STARTUP] Failed to build tauri app: {}", e);

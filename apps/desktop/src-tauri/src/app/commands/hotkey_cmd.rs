@@ -5,18 +5,17 @@ use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
-fn register_shortcut(app_handle: &AppHandle, hotkey: &str) {
+fn register_shortcut(app_handle: &AppHandle, hotkey: &str) -> AppResult<()> {
     if hotkey.is_empty()
         || hotkey.eq_ignore_ascii_case("MouseMiddle")
         || hotkey.eq_ignore_ascii_case("MButton")
     {
-        return;
+        return Ok(());
     }
 
     let normalized = hotkey.replace("Win", "Super");
-    if let Ok(shortcut) = normalized.parse::<Shortcut>() {
-        let _ = app_handle.global_shortcut().register(shortcut);
-    }
+    let shortcut = normalized.parse::<Shortcut>().map_err(|_|AppError::Validation("快捷键格式无效".into()))?;
+    app_handle.global_shortcut().register(shortcut).map_err(|_|AppError::Internal(format!("快捷键 {} 注册失败，请检查是否被其他程序占用",hotkey)))
 }
 
 pub(crate) fn sync_registered_hotkeys(app_handle: &AppHandle) -> AppResult<()> {
@@ -27,19 +26,19 @@ pub(crate) fn sync_registered_hotkeys(app_handle: &AppHandle) -> AppResult<()> {
     };
 
     let main_hotkey = settings.main_hotkey.lock().unwrap().clone();
-    register_shortcut(app_handle, &main_hotkey);
+    register_shortcut(app_handle, &main_hotkey)?;
 
     let sequential_mode = settings.sequential_mode.load(Ordering::Relaxed);
     let sequential_hotkey = settings.sequential_paste_hotkey.lock().unwrap().clone();
     if sequential_mode {
-        register_shortcut(app_handle, &sequential_hotkey);
+        let _ = register_shortcut(app_handle, &sequential_hotkey);
     }
 
     let rich_hotkey = settings.rich_paste_hotkey.lock().unwrap().clone();
-    register_shortcut(app_handle, &rich_hotkey);
+    let _ = register_shortcut(app_handle, &rich_hotkey);
 
     let search_hotkey = settings.search_hotkey.lock().unwrap().clone();
-    register_shortcut(app_handle, &search_hotkey);
+    let _ = register_shortcut(app_handle, &search_hotkey);
 
     Ok(())
 }
@@ -72,6 +71,11 @@ pub fn test_hotkey_available(app_handle: AppHandle, hotkey: String) -> AppResult
     let shortcut = normalized
         .parse::<Shortcut>()
         .map_err(|_| AppError::Validation("快捷键格式无效".to_string()))?;
+
+    // Testing our own active binding must not unregister it or report a conflict.
+    if app_handle.global_shortcut().is_registered(shortcut.clone()) {
+        return Ok(true);
+    }
 
     match app_handle.global_shortcut().register(shortcut.clone()) {
         Ok(_) => {

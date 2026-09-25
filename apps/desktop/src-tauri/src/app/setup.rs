@@ -303,10 +303,11 @@ fn load_settings(repo: &impl SettingsRepository) -> StartupSettings {
             .ok()
             .flatten()
             .and_then(|v| v.parse::<u32>().ok()),
-        main_hotkey: repo
-            .get("app.hotkey")
-            .unwrap_or(Some("Win+V".to_string()))
-            .unwrap_or("Win+V".to_string()),
+        main_hotkey: if repo.get("app.use_win_v_shortcut").ok().flatten().as_deref() == Some("true") {
+            "Win+V".to_string()
+        } else {
+            repo.get("app.hotkey").ok().flatten().unwrap_or_else(||"Ctrl+Alt+Shift+V".to_string())
+        },
         arrow_key_selection: repo
             .get("app.arrow_key_selection")
             .unwrap_or(Some("false".to_string()))
@@ -636,7 +637,7 @@ fn start_services(app: &App, s: &StartupSettings, app_handle: AppHandle) {
     // No upstream telemetry in Plus.
 
     // Register active hotkeys based on current settings.
-    let _ = crate::app::commands::register_hotkey(app_handle.clone(), s.main_hotkey.clone());
+    if let Err(error) = crate::app::commands::register_hotkey(app_handle.clone(), s.main_hotkey.clone()) { crate::error!("[Plus] main hotkey registration failed: {}",error); }
 
     // Win+V Optimization
     if db_state

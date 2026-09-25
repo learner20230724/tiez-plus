@@ -3,6 +3,13 @@ import * as P from '../../../../protocol/index.cjs';
 export type Endpoint = { product: 'tiez-plus'; v: 1; instanceId: string; desktopId: string; name: string; host: string; httpPort: number; wsPath: string; mqttPort?: number };
 export type Credentials = { deviceId: string; token: string };
 type Pending = { id: string; resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
+// A half-open socket can remain "connected" indefinitely after Wi-Fi/sleep.
+// Retire it on a failed application probe so discovery can rebuild the connection.
+// This never retries send_text; outbox retry remains an explicit user action.
+export async function checkDesktop(connection: PlusConnection): Promise<boolean> {
+  try { return (await connection.request('ping')).ok === true; }
+  catch { connection.close(); return false; }
+}
 export class PlusConnection {
   private client?: MqttClient;
   private pending = new Map<string, Pending>();

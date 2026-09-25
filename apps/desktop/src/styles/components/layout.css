@@ -45,7 +45,29 @@ header {
   min-width: 0;
   min-height: 20px;
   cursor: grab;
+  gap: 8px;
 }
+
+.header-top { cursor: grab; min-height: 32px; }
+.header-title { flex-shrink: 0; }
+.header-actions { flex-shrink: 0; }
+.plus-status { min-width: 0; font-size: 10px; }
+.plus-status-badge {
+  display: flex; align-items: center; gap: 4px; padding: 3px 0;
+  border: 0; background: transparent; color: #bd8a3c;
+  font: inherit; cursor: pointer; white-space: nowrap;
+}
+.plus-status-badge.ready { color: #339969; }
+.plus-status-panel {
+  position: fixed; z-index: 10000; top: 48px; left: 12px; right: 12px;
+  max-height: calc(100vh - 64px); overflow: auto; padding: 14px;
+  background: var(--bg-toolbar); color: var(--text-primary);
+  border: 1px solid var(--border-color, #666); border-radius: 10px;
+  box-shadow: 0 8px 24px #0005; font-size: 12px; cursor: default;
+}
+.plus-status-panel p { margin: 8px 0; line-height: 1.5; }
+.plus-status-close { float: right; color: inherit; background: transparent; border: 0; cursor: pointer; }
+@media (max-width: 320px) { .plus-status-label { display: none; } }
 
 .header-drag-region:active {
   cursor: grabbing;

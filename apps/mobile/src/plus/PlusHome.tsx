@@ -136,14 +136,13 @@ export default function PlusHome() {
     let alive=true;
     const boot=init().then(async()=>{
       await reload();
-      setSelected(draftsRef.current.filter(d=>d.content.length>0).map(d=>d.id));
+      // Restored drafts are visible but never silently selected on app launch.
+      setSelected([]);
       const cached=await runtime.store!.readCache<PullCache>('pull');if(alive)setPull(cached);
-      await captureClipboard().catch(()=>toast('未能读取手机剪贴板，可下拉重试'));
     }).catch(error=>{setSaveLabel('保存未就绪，请勿退出');showError(error);}).finally(()=>{if(alive)setLoading(false);});
     const off=subscribe(()=>{if(alive)void reload().catch(()=>{});});
     const app=AppState.addEventListener('change',state=>{
-      if(state==='active')void captureClipboard().catch(()=>toast('未能读取手机剪贴板'));
-      else void flush().catch(()=>setSaveLabel('保存失败，请勿退出'));
+      if(state!=='active')void flush().catch(()=>setSaveLabel('保存失败，请勿退出'));
     });
     const blur=navigation.addListener('blur',()=>{void flush().catch(showError);});
     const show=Keyboard.addListener(Platform.OS==='ios'?'keyboardWillShow':'keyboardDidShow',()=>setKeyboard(true));
@@ -152,7 +151,7 @@ export default function PlusHome() {
       if(!url.startsWith('tiezplus://'))return;
       await boot;
       if(url.includes('sync-pull')) {setMode('pull');await pullNow();}
-      else if(url.includes('sync-push')||url.includes('sync-now')) {setMode('push');await captureClipboard();}
+      else if(url.includes('sync-push')||url.includes('sync-now')) {setMode('push');}
     };
     const links=Linking.addEventListener('url',event=>{void handleLink(event).catch(showError);});
     void Linking.getInitialURL().then(url=>url?handleLink({url}):undefined).catch(showError);

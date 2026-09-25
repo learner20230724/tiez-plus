@@ -25,6 +25,14 @@ async function setup(t) {
   return {endpoint,enroll,mobile,desktop,server,clients};
 }
 test('broker PUBACK without desktop never resolves delivery',async t=>{const s=await setup(t);const c=await s.mobile();await assert.rejects(c.request('send_text',{content:'cannot lose this'}),/确认/);});
+
+test('failed application probe retires a stale connection; reconnect never replays a body',async t=>{
+  const s=await setup(t);const c=await s.mobile();
+  await assert.rejects(c.request('send_text',{content:'saved original'}));
+  assert.equal(await moduleUnderTest.checkDesktop(c),false);assert.equal(c.connected,false);
+  let texts=0;await s.desktop(r=>{if(r.type==='send_text')texts++;return {ok:true};});
+  await c.connect();assert.equal(await moduleUnderTest.checkDesktop(c),true);assert.equal(texts,0);
+});
 test('ACK-gated send and full-text pull use exact content; reconnect does not replay',async t=>{
   const s=await setup(t);let sends=0;const text='  '+ '长文🙂\r\n'.repeat(10000)+'  ';
   await s.desktop(r=>{if(r.type==='send_text'){sends++;assert.equal(r.content,text);return {status:'delivered'};}if(r.type==='get_current')return {ok:true,content:text};if(r.type==='get_content')return {ok:true,content:text};return {ok:true};});

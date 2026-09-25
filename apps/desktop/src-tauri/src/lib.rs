@@ -21,5 +21,11 @@ pub fn run() {
 mod plus_core_tests;
 
 #[cfg(test)]
+use plus_core_tests as core;
+#[cfg(test)]
+#[path = "services/plus/session.rs"]
+mod plus_session_tests;
+
+#[cfg(test)]
 #[path = "services/file_transfer/security.rs"]
 mod plus_transfer_security_tests;

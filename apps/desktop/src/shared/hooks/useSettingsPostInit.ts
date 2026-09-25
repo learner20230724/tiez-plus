@@ -185,6 +185,12 @@ export const useSettingsPostInit = ({
   setEmojiPanelTab,
   setEmojiFavorites
 }: UseSettingsPostInitOptions) => {
+  // Hydrate this preference only when its persisted value changes. Other UI
+  // callbacks can change identity on every render; they must not reset a toggle.
+  const persistedWinV = settings?.["app.use_win_v_shortcut"];
+  useEffect(() => {
+    if (persistedWinV !== undefined) setRegistryWinVEnabled(persistedWinV === "true");
+  }, [persistedWinV, setRegistryWinVEnabled]);
   useEffect(() => {
     if (!settings) return;
 
@@ -315,7 +321,6 @@ export const useSettingsPostInit = ({
     setMqttEnabled(settings["mqtt_enabled"] === "true");
     setMqttServer(settings["mqtt_server"] || "");
 
-    setRegistryWinVEnabled(settings["app.use_win_v_shortcut"] === "true");
     setMqttPort(settings["mqtt_port"] || "1883");
     setMqttUser(settings["mqtt_username"] || "");
     setMqttPass(settings["mqtt_password"] || "");

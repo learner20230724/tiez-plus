@@ -45,8 +45,8 @@ export default function HomeView(p:HomeViewProps) {
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={p.refreshing} onRefresh={p.refresh} tintColor={c.text}/> }>
       {p.loading ? <ActivityIndicator color={c.text} style={{marginTop:40}}/> : p.mode==='push' ? <>
         <Pressable testID="clipboard-card" accessibilityLabel="当前手机剪贴板" onPress={()=>clipboard?.content&&p.toggle(clipboard.id)} onLongPress={()=>clipboard?.content&&p.showDetail({title:'手机剪贴板',content:clipboard.content})} style={[s.card,clipboard&&p.selected.includes(clipboard.id)&&s.selected]}>
-          <Text testID="clipboard-preview" numberOfLines={3} ellipsizeMode="tail" style={s.body}>{clipboard?.content || '手机剪贴板为空'}</Text>
-          <View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>当前剪贴板</Text>{clipboard?.content ? check(clipboard.id):null}</View>
+          <Text testID="clipboard-preview" numberOfLines={3} ellipsizeMode="tail" style={s.body}>{clipboard?.content || '下拉读取手机最新剪贴板'}</Text>
+          <View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>下拉更新剪贴板</Text>{clipboard?.content ? check(clipboard.id):null}</View>
         </Pressable>
         {queued.map(d=><Pressable key={d.id} accessibilityLabel="待推送记录" style={[s.card,p.selected.includes(d.id)&&s.selected]} onPress={()=>p.toggle(d.id)} onLongPress={()=>p.showDetail({title:'待推送内容',content:d.content,draft:d})}>
           <Text numberOfLines={3} style={s.body}>{d.content}</Text><View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>{d.kind==='retry'?'重试':'待推送'}</Text>{check(d.id)}</View>

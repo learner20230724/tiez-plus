@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { MouseEvent, RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronLeft,
@@ -12,6 +12,8 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import PlusStatus from "../../../PlusStatus";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { getTagColor, getTagTextColor } from "../../../shared/lib/utils";
 
@@ -97,8 +99,16 @@ const AppHeader = ({
     }
   };
 
+  const startHeaderDrag = (event: MouseEvent<HTMLElement>) => {
+    if (event.button !== 0 || !(event.target instanceof Element)) return;
+    // Tauri's data attribute is not inherited by descendants. Explicitly handle
+    // title, gaps and padding, while preserving every interactive control.
+    if (event.target.closest('button,input,textarea,select,a,[role="dialog"],.window-no-drag')) return;
+    event.preventDefault();
+    void getCurrentWindow().startDragging().catch(console.error);
+  };
   return (
-  <header className="window-drag-region">
+  <header className="window-drag-region" onMouseDown={startHeaderDrag}>
     <div className="header-top">
       <div className="header-leading">
         {(showSettings || showTagManager || showEmojiPanel) && (
@@ -106,7 +116,7 @@ const AppHeader = ({
             <ChevronLeft size={18} />
           </button>
         )}
-        <div className="header-drag-region" data-tauri-drag-region>
+        <div className="header-drag-region">
           <span className="header-title">
             {showEmojiPanel
               ? (t('emoji_panel') || '表情包')
@@ -116,6 +126,7 @@ const AppHeader = ({
                   ? settingsTitle
                   : t('app_name')}
           </span>
+          <PlusStatus />
         </div>
       </div>
       <div className="header-actions window-no-drag">
@@ -161,7 +172,7 @@ const AppHeader = ({
             <MessageSquare size={16} />
           </button>
         )}
-        <button className="btn-icon" title={t('hide')} onClick={async () => {
+        <button className="btn-icon" title="隐藏到托盘（继续接收手机推送）" onClick={async () => {
           invoke("hide_window_cmd").catch(console.error);
         }}>
           <X size={16} />

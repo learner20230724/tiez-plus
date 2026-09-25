@@ -830,9 +830,10 @@ const ClipboardSettingsGroup = (props: ClipboardSettingsGroupProps) => {
                                     props.setRegistryWinVEnabled(enabled);
                                     try {
                                         await invoke("save_setting", { key: 'app.use_win_v_shortcut', value: String(enabled) });
+                                        props.saveAppSetting("use_win_v_shortcut", String(enabled));
                                         const changed = await invoke("trigger_registry_win_v_optimization", { enable: enabled });
                                         // Auto-switch hotkey based on user request
-                                        let targetHotkey = "Alt+C";
+                                        let targetHotkey = "Ctrl+Alt+Shift+V";
                                         if (enabled) {
                                             // Save current hotkey before switching to Win+V
                                             if (props.hotkey && props.hotkey !== "Win+V") {

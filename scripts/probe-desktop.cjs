@@ -7,6 +7,9 @@ const {randomUUID}=require('node:crypto');
 const mqtt=require('mqtt');
 const P=require('../protocol/index.cjs');
 async function main(){
+  const samples=Number(process.argv[2]||1);
+  const interval=Number(process.argv[3]||10000);
+  if(!Number.isInteger(samples)||samples<1||samples>120||!Number.isInteger(interval)||interval<0||interval>60000)throw new Error('Usage: node scripts/probe-desktop.cjs [samples 1..120] [intervalMs 0..60000]');
   const endpoint=JSON.parse(fs.readFileSync(path.join(process.env.ProgramData,'TIEZ Plus/broker/endpoint.json'),'utf8'));
   const response=await fetch(`http://127.0.0.1:${endpoint.httpPort}/api/v1/enroll`,{
     method:'POST',headers:{'Content-Type':'application/json'},
@@ -25,17 +28,25 @@ async function main(){
         if(error)reject(error);else if(!granted?.length || granted[0].qos===128)reject(new Error('Subscription rejected'));else resolve();
       }));
     });
-    const request={v:1,id:randomUUID(),requestId:randomUUID(),type:'ping',from:identity.deviceId,to:endpoint.desktopId};
-    await new Promise((resolve,reject)=>{
-      const timer=setTimeout(()=>reject(new Error('Desktop did not return an application response in 10 seconds')),10000);
-      client.on('message',(_topic,bytes)=>{
-        try {const r=JSON.parse(bytes.toString());
-          if(r.v!==1 || r.type!=='response' || r.from!==request.to || r.to!==request.from || r.id!==request.id || r.requestId!==request.requestId)return;
-          clearTimeout(timer);r.ok===true?resolve():reject(new Error('Desktop responded but is not ready'));
-        } catch(error){clearTimeout(timer);reject(error);}
+    for(let sample=0;sample<samples;sample++) {
+      if(sample)await new Promise(resolve=>setTimeout(resolve,interval));
+      const request={v:1,id:randomUUID(),requestId:randomUUID(),type:'ping',from:identity.deviceId,to:endpoint.desktopId};
+      const started=Date.now();
+      await new Promise((resolve,reject)=>{
+        const finish=error=>{clearTimeout(timer);client.removeListener('message',message);client.removeListener('close',closed);error?reject(error):resolve();};
+        const message=(_topic,bytes)=>{
+          try {const r=JSON.parse(bytes.toString());
+            if(r.v!==1 || r.type!=='response' || r.from!==request.to || r.to!==request.from || r.id!==request.id || r.requestId!==request.requestId)return;
+            finish(r.ok===true?undefined:new Error('Desktop responded but is not ready'));
+          } catch(error){finish(error);}
+        };
+        const closed=()=>finish(new Error('Connection closed during desktop probe'));
+        const timer=setTimeout(()=>finish(new Error('Desktop did not return an application response in 10 seconds')),10000);
+        client.on('message',message);client.once('close',closed);
+        client.publish(P.requestTopic(endpoint.instanceId,endpoint.desktopId),JSON.stringify(request),{qos:1,retain:false},error=>{if(error)finish(error);});
       });
-      client.publish(P.requestTopic(endpoint.instanceId,endpoint.desktopId),JSON.stringify(request),{qos:1,retain:false},error=>{if(error){clearTimeout(timer);reject(error);}});
-    });
+      console.log(`Application ping ${sample+1}/${samples}: ${Date.now()-started} ms`);
+    }
     console.log('PASS: desktop application replied to MQTT ping; this is not merely broker PUBACK. No clipboard or history request sent.');
   } finally {client.end(true);}
 }

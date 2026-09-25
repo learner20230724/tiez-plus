@@ -1,5 +1,7 @@
 # 手机 HomeView 的隔离界面预览
 
+电脑标题栏另有 `node scripts/desktop-ui-preview.mjs`，访问 `http://127.0.0.1:18767/desktop.html`。渲染真实 AppHeader / PlusStatus，用 mock Tauri API 记录 `window.__qa.drags` 和命令名；测试拖动调用、按钮排除和窄窗布局，不连接服务、不操作剪贴板或系统窗口。
+
 仅用于桌面浏览器视觉回归，不是手机应用，不连接 Broker，也不访问任何真实剪贴板。
 
 ## 运行

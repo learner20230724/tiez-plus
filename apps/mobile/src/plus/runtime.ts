@@ -3,7 +3,7 @@ import * as SQLite from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import { PlusStore, type Outbox, type Draft } from './store';
-import { PlusConnection, type Endpoint, type Credentials } from './transport';
+import { PlusConnection, checkDesktop, type Endpoint, type Credentials } from './transport';
 import * as P from '../../../../protocol/index.cjs';
 import { chooseEndpoint } from './discovery';
 
@@ -18,6 +18,8 @@ const notify = () => listeners.forEach(fn => fn());
 export function subscribe(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
 let initialized: Promise<void> | null = null;
 let active = false;
+let connectionGeneration = 0;
+let discoveryGeneration = 0;
 let preferred: string | null = null;
 let chooseTimer: ReturnType<typeof setTimeout> | undefined;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -56,9 +58,12 @@ export async function inspectEndpoint(host: string, port: number) {
 }
 export async function connect(endpoint: Endpoint) {
   if (runtime.connecting) return;
+  const generation = ++connectionGeneration;
+  const current = () => active && generation === connectionGeneration;
   runtime.connecting = true; runtime.ready = false; runtime.error = ''; runtime.status = '服务可达，正在连接电脑…'; runtime.connection?.close(); runtime.selected = endpoint; notify();
   try {
     await init();
+    if (!current()) return;
     const storageKey = `plus_${endpoint.instanceId}`;
     const old = await SecureStore.getItemAsync(storageKey);
     const identity: Credentials = old ? JSON.parse(old) : { deviceId: uuid(), token: '' };
@@ -66,30 +71,41 @@ export async function connect(endpoint: Endpoint) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'mobile', name: 'TIEZ Plus Android', ...identity }),
     });
     await SecureStore.setItemAsync(storageKey, JSON.stringify({ deviceId: enrolled.deviceId, token: enrolled.token }));
+    if (!current()) return;
     const c = new PlusConnection(endpoint, enrolled, uuid);
     c.onDisconnect = () => { if (runtime.connection === c) { runtime.ready = false; runtime.status = '连接已断开；不会自动补发'; notify(); } };
     c.onResult = result => { void runtime.store!.applyResult(result.id, endpoint, result.status, result.error || null).then(notify).catch(error => { runtime.error = `送达状态保存失败：${error.message}`; notify(); }); };
     runtime.connection = c; await c.connect();
-    if (!active) { c.close(); return; }
+    if (!current()) { c.close(); return; }
     preferred = endpoint.instanceId;
     await runtime.store!.cache('preferred-instance', preferred); await runtime.store!.cache('last-endpoint', endpoint);
     await probe(c);
-    // Query only. Never replay pending texts on reconnect or app launch.
-    if (runtime.ready) for (const record of await runtime.store!.pending(endpoint)) {
-      if (!c.connected) break;
-      await c.request('delivery_status', {}, record.id).catch(() => {});
-    }
-  } catch (error) { runtime.error = error instanceof Error ? error.message : String(error); runtime.status = '连接失败；文字保留在手机'; }
-  finally { runtime.connecting = false; notify(); }
+    // Status recovery must not hold the connection/re-discovery lock for minutes.
+    if (current() && runtime.ready) void recoverPending(c).catch(() => {});
+  } catch (error) { if(current()) {runtime.error = error instanceof Error ? error.message : String(error); runtime.status = '连接失败；文字保留在手机';} }
+  finally { if(generation === connectionGeneration) {runtime.connecting = false; notify();} }
 }
+async function recoverPending(c: PlusConnection) {
+  for (const record of await runtime.store!.pending(c.endpoint)) {
+    if (!active || runtime.connection !== c || !c.connected) break;
+    // Query only, never send_text. A failure lets discovery repair the connection.
+    try {await c.request('delivery_status', {}, record.id);} catch {break;}
+  }
+}
+
 async function probe(c: PlusConnection) {
-  try { const response = await c.request('ping'); if (runtime.connection !== c || !c.connected) return; runtime.ready = response.ok === true; runtime.status = runtime.ready ? `${c.endpoint.name} · 电脑已就绪` : '服务可达，电脑尚未就绪'; }
-  catch { if (runtime.connection !== c) return; runtime.ready = false; runtime.status = '服务可达，但电脑程序未响应'; }
+  const ready = await checkDesktop(c);
+  if (runtime.connection !== c || !active) return;
+  runtime.ready = ready;
+  runtime.status = ready ? `${c.endpoint.name} · 电脑已就绪` : '电脑未响应，正在重新发现连接；文字不会自动补发';
   notify();
 }
 let nativeSubscriptions: Array<{remove(): void}> = [];
 export async function startDiscovery() {
-  await init(); if (active) return; active = true; await runtime.store!.prune(); if (!active) return;
+  if (active) return;
+  const generation = ++discoveryGeneration;
+  await init(); if (generation !== discoveryGeneration || active) return; active = true;
+  await runtime.store!.prune(); if (!active || generation !== discoveryGeneration) return;
   const native = NativeModules.PlusDiscovery;
   if (native) {
     const emitter = new NativeEventEmitter(native);
@@ -111,7 +127,7 @@ export async function startDiscovery() {
   }, 15000);
 }
 export function stopDiscovery() {
-  active = false; clearInterval(timer); clearTimeout(chooseTimer); NativeModules.PlusDiscovery?.stop();
+  active = false; ++discoveryGeneration; ++connectionGeneration; runtime.connecting = false; clearInterval(timer); clearTimeout(chooseTimer); NativeModules.PlusDiscovery?.stop();
   nativeSubscriptions.forEach(s => s.remove()); nativeSubscriptions = [];
   runtime.connection?.close(); runtime.ready = false;
 }
