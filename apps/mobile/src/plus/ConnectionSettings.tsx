@@ -23,11 +23,11 @@ export default function ConnectionSettings() {
     </Pressable>
     {expanded&&<View style={{marginTop:18,gap:12}}>
       <Text style={{color:c.text,fontSize:14}}>{runtime.status}</Text>
-      <Text style={{color:c.subText,fontSize:12,lineHeight:20}}>服务：{runtime.connection?.connected?'已连接':'未连接'}　电脑：{runtime.ready?'已就绪':'未就绪'}</Text>
+      <Text style={{color:c.subText,fontSize:12,lineHeight:20}}>拉取来源服务：{runtime.connection?.connected?'已连接':'未连接'}　电脑：{runtime.ready?'已就绪':'未就绪'}</Text>
       {!!runtime.error&&<Text style={{color:c.subText,fontSize:13,lineHeight:20}}>{runtime.error}</Text>}
       <View style={{flexDirection:'row',gap:10}}>{button('重新发现',()=>{stopDiscovery();void startDiscovery().catch(error);})}{button('扫码连接',()=>{qrBusy.current=false;setQr(true);})}</View>
       {[...runtime.endpoints.values()].filter(e=>Date.now()-e.seen<45000).map(endpoint=><Pressable key={endpoint.instanceId} onPress={()=>{void connect(endpoint);}} style={{padding:12,borderRadius:12,borderWidth:StyleSheet.hairlineWidth,borderColor:c.divider}}><Text style={{color:c.text}}>{runtime.selected?.instanceId===endpoint.instanceId?'● ':'○ '}{endpoint.name}</Text><Text style={{color:c.subText,fontSize:12,marginTop:5}}>{endpoint.host}</Text></Pressable>)}
-      <Text style={{color:c.subText,fontSize:12,lineHeight:20}}>同一可信局域网自动连接；多台电脑时在此选择。不自动推送或重发。</Text>
+      <Text style={{color:c.subText,fontSize:12,lineHeight:20}}>推送会发送到同一局域网内所有已发现的电脑；此处选择只决定拉取哪台电脑。不自动推送或重发。</Text>
     </View>}
     <Modal visible={qr} animationType="slide" onRequestClose={()=>setQr(false)}><View style={{flex:1,paddingTop:insets.top+20,paddingBottom:insets.bottom+20,paddingHorizontal:20,backgroundColor:c.background}}><Text style={{fontSize:22,fontWeight:'600',color:c.text,marginBottom:18}}>扫描电脑连接码</Text>
       {!permission?.granted?button('允许相机',()=>{void requestPermission();}):<CameraView style={{flex:1,marginBottom:18}} barcodeScannerSettings={{barcodeTypes:['qr']}} onBarcodeScanned={({data})=>{

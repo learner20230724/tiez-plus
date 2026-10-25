@@ -1,4 +1,4 @@
-import type { Draft } from './store';
+import type { Draft, Target } from './store';
 export interface Remote { request(type: string, fields?: Record<string, unknown>): Promise<any> }
 export function clearArchivedDrafts(current: Draft[], sent: Draft[]): {drafts: Draft[]; deselect: string[]} {
   const snapshots = new Map(sent.map(d => [d.id, d])); const deselect: string[] = [];
@@ -26,14 +26,25 @@ export function mergeDrafts(persisted: Draft[], local: Draft[]): Draft[] {
   });
   return [...merged, ...remaining.values()];
 }
-export async function readComputer(remote: Remote) {
+export function isPullTarget(cache: {instanceId: string; desktopId?: string} | null, target: Target | null) {
+  return !!cache && !!target && cache.instanceId === target.instanceId && cache.desktopId === target.desktopId;
+}
+function assertSelected(isCurrent: () => boolean) {
+  if (!isCurrent()) throw new Error('拉取电脑已切换，请重新拉取');
+}
+export async function readComputer(remote: Remote, isCurrent = () => true) {
+  assertSelected(isCurrent);
   const current = await remote.request('get_current');
+  assertSelected(isCurrent);
   const recent = await remote.request('get_history', { limit: 50 });
+  assertSelected(isCurrent);
   if (!recent.ok) throw new Error(recent.error || '历史读取失败');
   return { current, entries: recent.entries || [], note: recent.note || '' };
 }
-export async function readEntry(remote: Remote, entryId: string): Promise<string> {
+export async function readEntry(remote: Remote, entryId: string, isCurrent = () => true): Promise<string> {
+  assertSelected(isCurrent);
   const response = await remote.request('get_content', { entryId });
+  assertSelected(isCurrent);
   if (!response.ok || typeof response.content !== 'string') throw new Error(response.error || '正文读取失败');
   return response.content;
 }

@@ -1,6 +1,6 @@
 # TIEZ Plus macOS 本地适配
 
-基于 `learner20230724/tiez-plus` master（下载时提交 `e38d635cfe6810b75adb55a99925a414400fa6b2`）。源码通过 GitHub API 下载归档，工作目录单独初始化了本地 Git 基线；尚未向 GitHub 推送。
+基于 `learner20230724/tiez-plus` master（下载时提交 `e38d635cfe6810b75adb55a99925a414400fa6b2`）。源码最初通过 GitHub API 下载归档，现已核对归档内容与原仓库提交一致，并接回原仓库 Git 历史；macOS 适配作为独立提交保存。
 
 ## 安装与使用
 

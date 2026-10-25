@@ -6,8 +6,9 @@ import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../theme/ThemeContext';
 import { useHaptics } from '../context/HapticContext';
 import { runtime, init, subscribe, sendDrafts, uuid } from './runtime';
+import { targetKey } from './fanout';
 import type { Draft, OutboxSummary } from './store';
-import { mergeDrafts, draftSnapshotMatches, clearArchivedDrafts, readComputer, readEntry, copyText } from './actions';
+import { mergeDrafts, draftSnapshotMatches, clearArchivedDrafts, readComputer, readEntry, copyText, isPullTarget } from './actions';
 import HomeView, { type Detail, type PullCache, type RemoteEntry } from './HomeView';
 
 export default function PlusHome() {
@@ -22,6 +23,7 @@ export default function PlusHome() {
   const [keyboard,setKeyboard]=useState(false);
   const [pushing,setPushing]=useState(false); const pushingRef=useRef(false);
   const [refreshing,setRefreshing]=useState(false); const refreshingRef=useRef(false);
+  const [,redraw]=useState(0);
   const [pull,setPull]=useState<PullCache|null>(null); const [pullError,setPullError]=useState('');
   const [historyOpen,setHistoryOpen]=useState(false); const [history,setHistory]=useState<OutboxSummary[]>([]);
   const [search,setSearch]=useState(''); const searchRef=useRef(''); const [historyPage,setHistoryPage]=useState(0); const pageRef=useRef(0);
@@ -79,25 +81,27 @@ export default function PlusHome() {
     pushingRef.current=true;setPushing(true);
     try {
       await flush();
-      await sendDrafts(chosen,()=>{
+      const sent=await sendDrafts(chosen,()=>{
         // The history transaction has committed. Never clear unsaved or newer edits.
         const archived=clearArchivedDrafts(draftsRef.current,chosen);
         update(archived.drafts);setSelected(ids=>ids.filter(id=>!archived.deselect.includes(id)));
         toast('已存入历史');
       });
-      triggerHaptic('success');toast('已送达');
+      triggerHaptic('success');toast(`已送达 ${sent.computers} 台电脑`);
     } catch(error) {showError(error);}
     finally {pushingRef.current=false;setPushing(false);await reload().catch(()=>{});}
   }
   async function pullNow() {
     if(refreshingRef.current)return; refreshingRef.current=true;setRefreshing(true);setPullError('');
+    const connection=runtime.connection, version=runtime.selectionVersion;
+    const current=()=>runtime.connection===connection && runtime.selectionVersion===version;
     try {
-      const connection=runtime.connection;
-      if(!connection?.connected)throw new Error('电脑未连接，请到设置查看连接');
-      const result=await readComputer(connection);
-      const cache:PullCache={instanceId:connection.endpoint.instanceId,name:connection.endpoint.name,at:Date.now(),...result};
-      await runtime.store!.cache('pull',cache);setPull(cache);
-    } catch(error) {setPullError((error instanceof Error?error.message:String(error))+'；保留上次记录');}
+      if(!connection?.connected || !isPullTarget(connection.endpoint,runtime.selected))throw new Error('请选择拉取电脑并连接，请到设置查看电脑连接');
+      const result=await readComputer(connection,current);
+      const cache:PullCache={instanceId:connection.endpoint.instanceId,desktopId:connection.endpoint.desktopId,name:connection.endpoint.name,at:Date.now(),...result};
+      await runtime.store!.cache(`pull:${targetKey(connection.endpoint)}`,cache);
+      if(current())setPull(cache);
+    } catch(error) {if(current())setPullError((error instanceof Error?error.message:String(error))+'；保留这台电脑的上次记录');}
     finally {refreshingRef.current=false;setRefreshing(false);}
   }
   async function refresh() {
@@ -108,9 +112,9 @@ export default function PlusHome() {
   }
   async function copy(content:string) {await copyText(content,Clipboard.setStringAsync);triggerHaptic('success');toast('已复制');}
   async function remoteContent(entry:RemoteEntry) {
-    const connection=runtime.connection;
-    if(!connection?.connected||connection.endpoint.instanceId!==pull?.instanceId)throw new Error('原电脑未连接，无法获取全文');
-    return readEntry(connection,entry.id);
+    const connection=runtime.connection,version=runtime.selectionVersion;
+    if(!connection?.connected || !isPullTarget(pull,runtime.selected) || !isPullTarget(pull,connection.endpoint))throw new Error('原电脑未连接，无法获取全文');
+    return readEntry(connection,entry.id,()=>runtime.connection===connection && runtime.selectionVersion===version);
   }
   async function queueHistory(id:string) {
     const draft=await runtime.store!.queueHistory(id);
@@ -134,13 +138,23 @@ export default function PlusHome() {
   const run=(action:()=>Promise<unknown>)=>{void action().catch(showError);};
   useEffect(()=>{
     let alive=true;
+    let cachedTarget='';
+    const syncPullTarget=async()=>{
+      const endpoint=runtime.selected,key=endpoint?targetKey(endpoint):'';
+      redraw(v=>v+1);
+      if(key===cachedTarget)return;
+      cachedTarget=key;setPull(null);setPullError('');setDetail(d=>d?.remoteTarget?null:d);
+      if(!endpoint)return;
+      const cached=await runtime.store!.readCache<PullCache>(`pull:${key}`);
+      if(alive && cachedTarget===key && isPullTarget(cached,runtime.selected))setPull(cached);
+    };
     const boot=init().then(async()=>{
       await reload();
       // Restored drafts are visible but never silently selected on app launch.
       setSelected([]);
-      const cached=await runtime.store!.readCache<PullCache>('pull');if(alive)setPull(cached);
+      await syncPullTarget();
     }).catch(error=>{setSaveLabel('保存未就绪，请勿退出');showError(error);}).finally(()=>{if(alive)setLoading(false);});
-    const off=subscribe(()=>{if(alive)void reload().catch(()=>{});});
+    const off=subscribe(()=>{if(alive){void syncPullTarget().catch(()=>{});void reload().catch(()=>{});}});
     const app=AppState.addEventListener('change',state=>{
       if(state!=='active')void flush().catch(()=>setSaveLabel('保存失败，请勿退出'));
     });
@@ -157,16 +171,18 @@ export default function PlusHome() {
     void Linking.getInitialURL().then(url=>url?handleLink({url}):undefined).catch(showError);
     return ()=>{alive=false;off();blur();app.remove();show.remove();hide.remove();links.remove();clearTimeout(feedbackTimer.current);void flush().catch(()=>{});};
   },[]);
+  const visiblePull=isPullTarget(pull,runtime.selected)?pull:null;
+  const visibleDetail=detail?.remoteTarget && (!runtime.selected || detail.remoteTarget!==targetKey(runtime.selected))?null:detail;
   return <HomeView colors={colors} top={insets.top} bottom={insets.bottom} keyboard={keyboard} loading={loading} mode={mode}
     setMode={next=>{run(flush);setMode(next);if(next==='pull')void pullNow();}}
     drafts={drafts} selected={selected} edit={edit} toggle={id=>setSelected(ids=>ids.includes(id)?ids.filter(x=>x!==id):[...ids,id])}
     selectAll={()=>{const ids=draftsRef.current.filter(d=>d.content.length>0).map(d=>d.id);setSelected(old=>ids.every(id=>old.includes(id))?[]:ids);}}
     push={()=>void push()} pushing={pushing} refreshing={refreshing} refresh={()=>void refresh()} saveLabel={saveLabel} feedback={feedback}
-    pull={pull} pullError={pullError} offline={!runtime.ready} copyCurrent={()=>{if(typeof pull?.current.content==='string')run(()=>copy(pull.current.content!));else toast(pull?.current.error||'没有文字');}}
-    copyRemote={entry=>run(async()=>copy(await remoteContent(entry)))} viewRemote={entry=>run(async()=>setDetail({title:'电脑记录全文',content:await remoteContent(entry)}))}
+    pull={visiblePull} pullError={pullError} offline={!runtime.ready} copyCurrent={()=>{if(isPullTarget(pull,runtime.selected) && typeof pull?.current.content==='string')run(()=>copy(pull.current.content!));else toast(visiblePull?.current.error||'没有文字');}}
+    copyRemote={entry=>run(async()=>copy(await remoteContent(entry)))} viewRemote={entry=>run(async()=>{const content=await remoteContent(entry);setDetail({title:'电脑记录全文',content,remoteTarget:targetKey(runtime.selected!)});})}
     historyOpen={historyOpen} openHistory={()=>{run(flush);run(loadHistory);setHistoryOpen(true);}} closeHistory={()=>setHistoryOpen(false)} history={history} search={search}
     searchHistory={query=>{setSearch(query);searchRef.current=query;pageRef.current=0;setHistoryPage(0);run(loadHistory);}} historyPage={historyPage}
     changeHistoryPage={delta=>{pageRef.current=Math.max(0,pageRef.current+delta);setHistoryPage(pageRef.current);run(loadHistory);}}
-    queueHistory={id=>run(()=>queueHistory(id))} viewHistory={id=>run(()=>viewHistory(id))} detail={detail} showDetail={setDetail} closeDetail={()=>setDetail(null)}
-    copyDetail={()=>{if(detail)run(async()=>{await copy(detail.content);setDetail(null);});}} editDetail={()=>run(editDetail)} deleteDetail={deleteDetail}/>;
+    queueHistory={id=>run(()=>queueHistory(id))} viewHistory={id=>run(()=>viewHistory(id))} detail={visibleDetail} showDetail={setDetail} closeDetail={()=>setDetail(null)}
+    copyDetail={()=>{if(visibleDetail)run(async()=>{await copy(visibleDetail.content);setDetail(null);});}} editDetail={()=>run(editDetail)} deleteDetail={deleteDetail}/>;
 }

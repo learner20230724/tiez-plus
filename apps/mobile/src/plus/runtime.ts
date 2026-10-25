@@ -6,13 +6,14 @@ import { PlusStore, type Outbox, type Draft } from './store';
 import { PlusConnection, checkDesktop, type Endpoint, type Credentials } from './transport';
 import * as P from '../../../../protocol/index.cjs';
 import { chooseEndpoint } from './discovery';
+import { PeerPool, broadcastTargets, deliverBroadcast } from './fanout';
 
 export const uuid = () => Crypto.randomUUID();
 const listeners = new Set<() => void>();
 export const runtime = {
   store: null as PlusStore | null, connection: null as PlusConnection | null,
   endpoints: new Map<string, Endpoint & { seen: number }>(), selected: null as Endpoint | null,
-  ready: false, status: '正在查找同一局域网中的电脑…', error: '', connecting: false,
+  selectionVersion: 0, ready: false, status: '正在查找同一局域网中的电脑…', error: '', connecting: false,
 };
 const notify = () => listeners.forEach(fn => fn());
 export function subscribe(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
@@ -29,6 +30,7 @@ export async function init() {
     const db = await SQLite.openDatabaseAsync('tiez-plus.sqlite');
     runtime.store = new PlusStore(db, uuid); await runtime.store.init();
     preferred = await runtime.store.readCache<string>('preferred-instance');
+    runtime.selected = await runtime.store.readCache<Endpoint>('last-endpoint');
   })().catch(error => { initialized = null; throw error; });
   return initialized;
 }
@@ -56,38 +58,58 @@ export async function inspectEndpoint(host: string, port: number) {
     return endpoint;
   } finally { checking.delete(key); }
 }
+// Connections used by push are independent of the computer selected for pull.
+const peers = new PeerPool<PlusConnection>(async endpoint => {
+  const storageKey = `plus_${endpoint.instanceId}`;
+  const old = await SecureStore.getItemAsync(storageKey);
+  const identity: Credentials = old ? JSON.parse(old) : { deviceId: uuid(), token: '' };
+  const enrolled = await fetchJson(`http://${endpoint.host}:${endpoint.httpPort}/api/v1/enroll`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'mobile', name: 'TIEZ Plus Android', ...identity }),
+  });
+  await SecureStore.setItemAsync(storageKey, JSON.stringify({ deviceId: enrolled.deviceId, token: enrolled.token }));
+  const c = new PlusConnection(endpoint, enrolled, uuid);
+  c.onDisconnect = () => {
+    if (runtime.connection === c) { runtime.ready = false; runtime.status = '连接已断开；不会自动补发'; }
+    notify();
+  };
+  c.onResult = result => { void runtime.store!.applyResult(result.id, endpoint, result.status, result.error || null).then(notify).catch(error => { runtime.error = `送达状态保存失败：${error.message}`; notify(); }); };
+  try { await c.connect(); return c; } catch (error) { c.close(); throw error; }
+});
+const recovered = new WeakSet<PlusConnection>();
+async function getConnection(endpoint: Endpoint) {
+  if (!active) throw new Error('应用不在前台，请重新推送');
+  const c = await peers.acquire(endpoint);
+  if (!active) throw new Error('连接已停止，请重新推送');
+  // Query receipts only. Reconnecting must never replay text automatically.
+  if (!recovered.has(c)) { recovered.add(c); void recoverPending(c).catch(() => {}); }
+  return c;
+}
+export function pushTargets() {
+  return broadcastTargets([...runtime.endpoints.values()], peers.values().filter(c => c.connected).map(c => c.endpoint));
+}
 export async function connect(endpoint: Endpoint) {
-  if (runtime.connecting) return;
   const generation = ++connectionGeneration;
+  ++runtime.selectionVersion;
   const current = () => active && generation === connectionGeneration;
-  runtime.connecting = true; runtime.ready = false; runtime.error = ''; runtime.status = '服务可达，正在连接电脑…'; runtime.connection?.close(); runtime.selected = endpoint; notify();
+  runtime.connecting = true; runtime.ready = false; runtime.error = ''; runtime.status = '正在连接选中的拉取电脑…';
+  runtime.connection = null; runtime.selected = endpoint; notify();
   try {
     await init();
     if (!current()) return;
-    const storageKey = `plus_${endpoint.instanceId}`;
-    const old = await SecureStore.getItemAsync(storageKey);
-    const identity: Credentials = old ? JSON.parse(old) : { deviceId: uuid(), token: '' };
-    const enrolled = await fetchJson(`http://${endpoint.host}:${endpoint.httpPort}/api/v1/enroll`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'mobile', name: 'TIEZ Plus Android', ...identity }),
-    });
-    await SecureStore.setItemAsync(storageKey, JSON.stringify({ deviceId: enrolled.deviceId, token: enrolled.token }));
-    if (!current()) return;
-    const c = new PlusConnection(endpoint, enrolled, uuid);
-    c.onDisconnect = () => { if (runtime.connection === c) { runtime.ready = false; runtime.status = '连接已断开；不会自动补发'; notify(); } };
-    c.onResult = result => { void runtime.store!.applyResult(result.id, endpoint, result.status, result.error || null).then(notify).catch(error => { runtime.error = `送达状态保存失败：${error.message}`; notify(); }); };
-    runtime.connection = c; await c.connect();
-    if (!current()) { c.close(); return; }
+    // Persist the explicit selection even if that computer is temporarily offline.
     preferred = endpoint.instanceId;
     await runtime.store!.cache('preferred-instance', preferred); await runtime.store!.cache('last-endpoint', endpoint);
+    if (!current()) return;
+    const c = await getConnection(endpoint);
+    if (!current()) return;
+    runtime.connection = c;
     await probe(c);
-    // Status recovery must not hold the connection/re-discovery lock for minutes.
-    if (current() && runtime.ready) void recoverPending(c).catch(() => {});
-  } catch (error) { if(current()) {runtime.error = error instanceof Error ? error.message : String(error); runtime.status = '连接失败；文字保留在手机';} }
+  } catch (error) { if(current()) {runtime.error = error instanceof Error ? error.message : String(error); runtime.status = '选中的电脑连接失败；文字保留在手机';} }
   finally { if(generation === connectionGeneration) {runtime.connecting = false; notify();} }
 }
 async function recoverPending(c: PlusConnection) {
   for (const record of await runtime.store!.pending(c.endpoint)) {
-    if (!active || runtime.connection !== c || !c.connected) break;
+    if (!active || peers.peek(c.endpoint) !== c || !c.connected) break;
     // Query only, never send_text. A failure lets discovery repair the connection.
     try {await c.request('delivery_status', {}, record.id);} catch {break;}
   }
@@ -114,48 +136,58 @@ export async function startDiscovery() {
     native.start();
   } else { runtime.error = '此功能需要原生 Android 安装包，不支持 Expo Go'; notify(); }
   const last = await runtime.store!.readCache<Endpoint>('last-endpoint');
+  if (!active || generation !== discoveryGeneration) return;
   if (last) void inspectEndpoint(last.host, last.httpPort).catch(() => {});
   timer = setInterval(() => {
-    if (!active || runtime.connecting) return;
-    const c = runtime.connection;
-    if (c?.connected) void probe(c);
-    else {
-      const lastKnown = runtime.selected;
-      if (lastKnown) void inspectEndpoint(lastKnown.host, lastKnown.httpPort).catch(() => {});
-      native?.start();
-    }
+    if (!active) return;
+    // Refresh every known computer, including peers not selected for pull.
+    const known = new Map(runtime.endpoints);
+    if (runtime.selected && !known.has(runtime.selected.instanceId)) known.set(runtime.selected.instanceId, { ...runtime.selected, seen: 0 });
+    for (const endpoint of known.values()) void inspectEndpoint(endpoint.host, endpoint.httpPort).catch(() => {});
+    for (const c of peers.values()) if (c.connected) void probe(c);
+    if (!pushTargets().length) native?.start();
   }, 15000);
 }
 export function stopDiscovery() {
   active = false; ++discoveryGeneration; ++connectionGeneration; runtime.connecting = false; clearInterval(timer); clearTimeout(chooseTimer); NativeModules.PlusDiscovery?.stop();
   nativeSubscriptions.forEach(s => s.remove()); nativeSubscriptions = [];
-  runtime.connection?.close(); runtime.ready = false;
+  peers.closeAll(); runtime.connection = null; runtime.ready = false; notify();
 }
-export async function sendRecord(record: Outbox) {
-  const c = runtime.connection;
-  if (!c || !c.connected || c.endpoint.instanceId !== record.target_instance || c.endpoint.desktopId !== record.target_device) {
-    await runtime.store!.markUnconfirmed(record.id, '原定电脑未连接，请连接后手动重试'); notify(); throw new Error('原定电脑未连接，内容已保留');
-  }
-  await runtime.store!.markSending(record.id); notify();
+export async function sendRecord(record: Outbox, targets = pushTargets(), generation = discoveryGeneration) {
+  // A late ACK may have arrived after this retry was queued.
+  if ((await runtime.store!.getRecord(record.id))?.status === 'delivered') return;
+  const target = targets.find(e => e.instanceId === record.target_instance && e.desktopId === record.target_device);
   try {
+    if (!target) throw new Error('原定电脑未发现，请上线后手动重试');
+    if (!active || generation !== discoveryGeneration) throw new Error('连接已停止，请手动重试');
+    const c = await getConnection(target);
+    if (!active || generation !== discoveryGeneration) throw new Error('连接已停止，请手动重试');
+    if ((await runtime.store!.getRecord(record.id))?.status === 'delivered') return;
+    await runtime.store!.markSending(record.id); notify();
+    if (!active || generation !== discoveryGeneration) throw new Error('连接已停止，请手动重试');
     const result = await c.request('send_text', { content: record.content }, record.id);
     await runtime.store!.applyResult(record.id, c.endpoint, result.status, result.error || null); notify();
     if (result.status !== 'delivered') throw new Error(result.error || '电脑未确认完成，内容已保留');
   } catch (error) {
-    // Do not overwrite a concrete copy_failed/unknown result with a generic timeout.
     const row = await runtime.store!.getRecord(record.id);
-    if (row?.status === 'sending') await runtime.store!.markUnconfirmed(record.id, error instanceof Error ? error.message : String(error));
+    if (row?.status === 'delivered') return;
+    // Preserve concrete copy_failed/unknown responses rather than overwriting them.
+    if (row?.status === 'sending' || row?.status === 'saved') await runtime.store!.markUnconfirmed(record.id, error instanceof Error ? error.message : String(error));
     notify(); throw error;
   }
 }
 export async function sendDrafts(drafts: Draft[], onArchived?: (rows: Outbox[]) => void) {
-  const target = runtime.selected || await runtime.store!.readCache<Endpoint>('last-endpoint');
-  // Drafts are still saved even when no computer has ever been selected.
+  const generation = discoveryGeneration;
+  await init();
+  const targets = pushTargets(); // Freeze recipients for this explicit button press.
   for (const d of drafts) await runtime.store!.saveDraft(d);
-  if (!target) throw new Error('文字已保存为草稿，尚未发现电脑');
-  const rows = await runtime.store!.prepare(drafts, target, true);
+  if (!active || generation !== discoveryGeneration) throw new Error('连接已停止；草稿已保存，请回到前台后手动推送');
+  const rows = await runtime.store!.prepareBroadcast(drafts, targets);
   onArchived?.(rows); notify();
-  const errors: string[] = [];
-  for (const row of rows) try { await sendRecord(row); } catch (e) { errors.push(e instanceof Error ? e.message : String(e)); }
-  if (errors.length) throw new Error(`${errors.length} 条未确认完成，已保留在历史中。${errors[0]}`);
+  const result = await deliverBroadcast(rows, row => sendRecord(row, targets, generation));
+  if (result.failures.length) {
+    const first = result.failures[0];
+    throw new Error(`已确认 ${result.delivered}/${result.total} 条送达（共 ${result.computers} 台电脑）；未确认的记录保留在历史中。${first.record.target_name || first.record.target_device}：${first.error}`);
+  }
+  return result;
 }

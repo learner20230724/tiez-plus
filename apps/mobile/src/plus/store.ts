@@ -7,10 +7,10 @@ export interface Database {
 }
 export type DraftKind = 'input' | 'clipboard' | 'history' | 'retry';
 export type Draft = { id: string; content: string; revision: number; updated_at: number; kind?: DraftKind; source_outbox_id?: string | null };
-export type Target = { instanceId: string; desktopId: string };
+export type Target = { instanceId: string; desktopId: string; name?: string };
 export type Outbox = {
   id: string; content: string; draft_id: string | null; draft_revision: number;
-  target_instance: string; target_device: string; status: string;
+  target_instance: string; target_device: string; target_name?: string; status: string;
   created_at: number; delivered_at: number | null; error: string | null; attempts: number;
 };
 export type OutboxSummary = Omit<Outbox, 'content'> & {preview: string};
@@ -35,6 +35,8 @@ export class PlusStore {
     const columns = await this.db.getAllAsync<{name: string}>('PRAGMA table_info(plus_drafts)');
     if (!columns.some(c => c.name === 'kind')) await this.db.execAsync("ALTER TABLE plus_drafts ADD COLUMN kind TEXT NOT NULL DEFAULT 'input'");
     if (!columns.some(c => c.name === 'source_outbox_id')) await this.db.execAsync('ALTER TABLE plus_drafts ADD COLUMN source_outbox_id TEXT');
+    const outboxColumns = await this.db.getAllAsync<{name: string}>('PRAGMA table_info(plus_outbox)');
+    if (!outboxColumns.some(c => c.name === 'target_name')) await this.db.execAsync("ALTER TABLE plus_outbox ADD COLUMN target_name TEXT NOT NULL DEFAULT ''");
     await this.db.runAsync("UPDATE plus_outbox SET status='unconfirmed',error='应用退出，送达结果待确认' WHERE status='sending'");
     await this.prune();
   }
@@ -44,25 +46,39 @@ export class PlusStore {
   saveDraft(d: Draft) { return this.serialized(() => this.writeDraft(d)); }
   drafts() { return this.serialized(() => this.db.getAllAsync<Draft>('SELECT * FROM plus_drafts ORDER BY updated_at,id')); }
   prepare(drafts: Draft[], target: Target, archiveDrafts = false) {
+    return this.prepareTargets(drafts, [target], archiveDrafts, false);
+  }
+  prepareBroadcast(drafts: Draft[], targets: Target[]) {
+    return this.prepareTargets(drafts, targets, true, true);
+  }
+  private prepareTargets(drafts: Draft[], targets: Target[], archiveDrafts: boolean, retryOriginal: boolean) {
     return this.serialized(() => this.transaction(async () => {
+      const unique = [...new Map(targets.map(t => [`${t.instanceId}/${t.desktopId}`, t])).values()];
       const result: Outbox[] = [];
       for (const d of drafts) {
         await this.writeDraft(d);
-        let record: Outbox | null = null;
+        let retry: Outbox | null = null;
         if (d.kind === 'retry' && d.source_outbox_id) {
-          record = await this.db.getFirstAsync<Outbox>('SELECT * FROM plus_outbox WHERE id=?', d.source_outbox_id);
-          if (!record || record.content !== d.content) throw new Error('原记录已变更，请编辑后重新推送');
-          if (record.target_instance !== target.instanceId || record.target_device !== target.desktopId) throw new Error('请在设置中连接这条记录原来的电脑，或编辑后作为新内容推送');
+          retry = await this.db.getFirstAsync<Outbox>('SELECT * FROM plus_outbox WHERE id=?', d.source_outbox_id);
+          if (!retry || retry.content !== d.content) throw new Error('原记录已变更，请编辑后重新推送');
+          if (!retryOriginal && !unique.some(t => retry!.target_instance === t.instanceId && retry!.target_device === t.desktopId))
+            throw new Error('请连接这条记录原来的电脑，或编辑后作为新内容推送');
         }
-        if (!record) {
-        record = { id: this.uuid(), content: d.content, draft_id: d.id, draft_revision: d.revision,
-          target_instance: target.instanceId, target_device: target.desktopId, status: 'saved', created_at: this.clock(), delivered_at: null, error: null, attempts: 0 };
-        await this.db.runAsync('INSERT INTO plus_outbox(id,content,draft_id,draft_revision,target_instance,target_device,status,created_at) VALUES(?,?,?,?,?,?,?,?)',
-          record.id, record.content, record.draft_id, record.draft_revision, record.target_instance, record.target_device, record.status, record.created_at);
+        if (retry) result.push(retry);
+        else {
+          if (!unique.length) throw new Error('文字已保存为草稿，尚未发现局域网电脑');
+          for (const target of unique) {
+            const record: Outbox = { id: this.uuid(), content: d.content, draft_id: d.id, draft_revision: d.revision,
+              target_instance: target.instanceId, target_device: target.desktopId, target_name: target.name || target.desktopId,
+              status: 'saved', created_at: this.clock(), delivered_at: null, error: null, attempts: 0 };
+            await this.db.runAsync('INSERT INTO plus_outbox(id,content,draft_id,draft_revision,target_instance,target_device,target_name,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+              record.id, record.content, record.draft_id, record.draft_revision, record.target_instance, record.target_device, record.target_name, record.status, record.created_at);
+            result.push(record);
+          }
         }
         if (archiveDrafts && d.kind !== 'clipboard') await this.db.runAsync("UPDATE plus_drafts SET content='',revision=revision+1,updated_at=?,source_outbox_id=NULL WHERE id=? AND revision=? AND content=?", this.clock(), d.id, d.revision, d.content);
-        result.push(record);
       }
+      // All targets are durable in one transaction before anything becomes eligible for transmission.
       return result;
     }));
   }
@@ -107,7 +123,7 @@ export class PlusStore {
   history(query = '') { return this.serialized(() => this.db.getAllAsync<Outbox>('SELECT * FROM plus_outbox WHERE instr(content,?)>0 ORDER BY created_at DESC,id DESC', query)); }
   getRecord(id: string) { return this.serialized(() => this.db.getFirstAsync<Outbox>('SELECT * FROM plus_outbox WHERE id=?',id)); }
   listHistory(query = '', offset = 0) { return this.serialized(() => this.db.getAllAsync<OutboxSummary>(
-    `SELECT id,substr(content,1,300) preview,draft_id,draft_revision,target_instance,target_device,status,created_at,delivered_at,error,attempts
+    `SELECT id,substr(content,1,300) preview,draft_id,draft_revision,target_instance,target_device,target_name,status,created_at,delivered_at,error,attempts
     FROM plus_outbox WHERE instr(content,?)>0 ORDER BY created_at DESC,id DESC LIMIT 100 OFFSET ?`,query,Math.max(0,Math.floor(offset)))); }
   pending(target: Target) { return this.serialized(() => this.db.getAllAsync<Pick<Outbox,'id'>>("SELECT id FROM plus_outbox WHERE target_instance=? AND target_device=? AND status<>'delivered' ORDER BY created_at DESC LIMIT 50", target.instanceId, target.desktopId)); }
   remove(id: string) { return this.serialized(() => this.db.runAsync('DELETE FROM plus_outbox WHERE id=?', id)); }

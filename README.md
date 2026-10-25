@@ -2,6 +2,8 @@
 
 macOS Apple Silicon 本地适配见 [docs/MACOS.md](docs/MACOS.md)，构建脚本 `scripts/build-macos.sh`。
 
+**最新源码行为（未打包 APK）：** 手机推送到局域网内所有已发现的 Plus 电脑；拉取只读取“设置 → 电脑连接”选中的电脑。发送状态按电脑分别记录，失败重试只发给原电脑。详见 [多电脑推送与单电脑拉取](docs/MULTI-DESKTOP.md)。下方版本号和安装包说明为此前已发布版本，不包含本次手机改动。
+
 独立于旧版 TieZ 的个人局域网剪贴板工具：**先保存，再发送；电脑处理完成才算送达。**
 
 **当前更新：Windows `TIEZ Plus_0.1.0_x64-setup-fix4.exe`，手机 `TIEZ-Plus-0.1.2-arm64-v8a.apk`。** 本次修正标题栏拖动、状态显示和 Win+V 设置回显，改进后台连接恢复；手机只在推送页下拉时读取剪贴板。详见 `docs/USAGE-FIX4.md`。安装升级不需要先卸载、删除历史或关闭杀毒软件。

@@ -6,8 +6,8 @@ import type { Draft, Outbox, OutboxSummary } from './store';
 import { editorRows } from './actions';
 
 export type RemoteEntry = {id:string; preview:string; timestamp:number; content_type:string};
-export type PullCache = {instanceId:string; name:string; at:number; current:{content?:string;error?:string;ok:boolean}; entries:RemoteEntry[]; note?:string};
-export type Detail = {title:string;content:string;record?:Outbox;draft?:Draft};
+export type PullCache = {instanceId:string; desktopId?:string; name:string; at:number; current:{content?:string;error?:string;ok:boolean}; entries:RemoteEntry[]; note?:string};
+export type Detail = {title:string;content:string;record?:Outbox;draft?:Draft;remoteTarget?:string};
 export const stateName: Record<string,string> = {saved:'待推送',sending:'发送中',unconfirmed:'未确认送达',delivered:'已送达',stored:'电脑已保存',copy_failed:'电脑复制失败',unknown:'结果待确认',rejected:'未送达'};
 export type HomeViewProps = {
   colors:typeof Colors.light; top:number; bottom:number; keyboard:boolean; loading:boolean;
@@ -44,12 +44,13 @@ export default function HomeView(p:HomeViewProps) {
     </View>
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={p.refreshing} onRefresh={p.refresh} tintColor={c.text}/> }>
       {p.loading ? <ActivityIndicator color={c.text} style={{marginTop:40}}/> : p.mode==='push' ? <>
+        <Text style={s.hint}>推送到局域网内所有已发现的电脑；失败记录重试只发给原电脑。</Text>
         <Pressable testID="clipboard-card" accessibilityLabel="当前手机剪贴板" onPress={()=>clipboard?.content&&p.toggle(clipboard.id)} onLongPress={()=>clipboard?.content&&p.showDetail({title:'手机剪贴板',content:clipboard.content})} style={[s.card,clipboard&&p.selected.includes(clipboard.id)&&s.selected]}>
           <Text testID="clipboard-preview" numberOfLines={3} ellipsizeMode="tail" style={s.body}>{clipboard?.content || '下拉读取手机最新剪贴板'}</Text>
           <View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>下拉更新剪贴板</Text>{clipboard?.content ? check(clipboard.id):null}</View>
         </Pressable>
         {queued.map(d=><Pressable key={d.id} accessibilityLabel="待推送记录" style={[s.card,p.selected.includes(d.id)&&s.selected]} onPress={()=>p.toggle(d.id)} onLongPress={()=>p.showDetail({title:'待推送内容',content:d.content,draft:d})}>
-          <Text numberOfLines={3} style={s.body}>{d.content}</Text><View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>{d.kind==='retry'?'重试':'待推送'}</Text>{check(d.id)}</View>
+          <Text numberOfLines={3} style={s.body}>{d.content}</Text><View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>{d.kind==='retry'?'重试原电脑':'待推送到所有电脑'}</Text>{check(d.id)}</View>
         </Pressable>)}
         {editorRows(p.drafts).map((d,index)=><View key={d.id} style={[s.card,{padding:4},p.selected.includes(d.id)&&d.content.length>0&&s.selected]}>
           <TextInput accessibilityLabel={`输入内容 ${index+1}`} multiline scrollEnabled value={d.content} onChangeText={text=>p.edit(d.id,text)} placeholder={index===0?'在此输入内容…':'继续输入下一条…'} placeholderTextColor={c.subText} style={s.input}/>
@@ -59,7 +60,7 @@ export default function HomeView(p:HomeViewProps) {
         <View style={[s.row,{justifyContent:'space-between',marginBottom:14}]}><Text style={s.small}>{p.pull?`${p.pull.name} · ${new Date(p.pull.at).toLocaleTimeString()}${p.offline?' · 离线缓存':''}`:'电脑剪贴板'}</Text><Pressable accessibilityLabel="刷新电脑记录" onPress={p.refresh} style={{padding:8}}><Feather name="refresh-cw" size={18} color={c.text}/></Pressable></View>
         {!!p.pullError&&<Text style={s.hint}>{p.pullError}</Text>}
         {p.pull ? <>
-          <Pressable accessibilityLabel="复制电脑当前剪贴板" style={s.card} onPress={p.copyCurrent} onLongPress={()=>typeof p.pull?.current.content==='string'&&p.showDetail({title:'电脑当前内容',content:p.pull.current.content})}>
+          <Pressable accessibilityLabel="复制电脑当前剪贴板" style={s.card} onPress={p.copyCurrent} onLongPress={()=>typeof p.pull?.current.content==='string'&&p.showDetail({title:'电脑当前内容',content:p.pull.current.content,remoteTarget:`${p.pull.instanceId}/${p.pull.desktopId}`} )}>
             <Text numberOfLines={3} style={s.body}>{p.pull.current.content || p.pull.current.error || '电脑剪贴板为空'}</Text><View style={[s.row,{marginTop:8,justifyContent:'space-between'}]}><Text style={s.small}>当前剪贴板</Text><Feather name="copy" size={16} color={c.subText}/></View>
           </Pressable>
           <Text style={[s.hint,{marginTop:8}]}>最近记录 · 点击复制</Text>
@@ -73,16 +74,16 @@ export default function HomeView(p:HomeViewProps) {
     {p.mode==='push'&&!p.loading&&<View style={s.footer}>
       {!!p.saveLabel&&<Text style={[s.hint,{textAlign:'center',marginBottom:8}]}>{p.saveLabel}</Text>}
       <View style={s.actions}><Pressable accessibilityRole="button" style={s.button} onPress={p.selectAll}><Feather name="check-square" size={18} color={c.text}/><Text style={s.buttonText}>{count>0&&p.selected.filter(id=>p.drafts.some(d=>d.id===id&&d.content.length)).length===count?'取消全选':'全选'}</Text></Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="推送所选内容" disabled={p.pushing} style={[s.button,s.primary,p.pushing&&{opacity:.7}]} onPress={p.push}>{p.pushing?<ActivityIndicator size="small" color={c.primaryText}/>:<Feather name="upload-cloud" size={18} color={c.primaryText}/>}<Text style={[s.buttonText,{color:c.primaryText}]}>推送</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="推送所选内容到局域网内所有电脑" disabled={p.pushing} style={[s.button,s.primary,p.pushing&&{opacity:.7}]} onPress={p.push}>{p.pushing?<ActivityIndicator size="small" color={c.primaryText}/>:<Feather name="upload-cloud" size={18} color={c.primaryText}/>}<Text style={[s.buttonText,{color:c.primaryText}]}>推送</Text></Pressable>
       </View>
     </View>}
     {!!p.feedback&&<View pointerEvents="none" style={s.toast}><Text style={s.toastText}>{p.feedback}</Text></View>}
     <Modal visible={p.historyOpen} animationType="slide" onRequestClose={p.closeHistory}>
       <View style={s.modal}><View style={s.modalHeader}><Text style={s.modalTitle}>手机历史</Text>{closeIcon(p.closeHistory)}</View><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingHorizontal:20,paddingBottom:24}}>
         <TextInput accessibilityLabel="搜索手机历史" value={p.search} onChangeText={p.searchHistory} placeholder="搜索历史" placeholderTextColor={c.subText} style={s.search}/>
-        <Text style={s.hint}>点击加入待推送 · 长按查看全文</Text>
+        <Text style={s.hint}>点击加入待推送 · 长按查看全文；未送达记录仅重试原电脑</Text>
         {p.history.map(r=><Pressable key={r.id} accessibilityLabel="加入待推送" style={s.card} onPress={()=>p.queueHistory(r.id)} onLongPress={()=>p.viewHistory(r.id)}>
-          <Text numberOfLines={3} style={s.body}>{r.preview}</Text><View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>{stateName[r.status]||r.status} · {new Date(r.created_at).toLocaleString()}</Text><Pressable accessibilityLabel="查看历史详情" onPress={e=>{e.stopPropagation();p.viewHistory(r.id);}} style={{padding:6}}><Feather name="more-horizontal" size={18} color={c.subText}/></Pressable></View>
+          <Text style={s.hint}>{r.target_name||r.target_device}</Text><Text numberOfLines={3} style={s.body}>{r.preview}</Text><View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>{stateName[r.status]||r.status} · {new Date(r.created_at).toLocaleString()}</Text><Pressable accessibilityLabel="查看历史详情" onPress={e=>{e.stopPropagation();p.viewHistory(r.id);}} style={{padding:6}}><Feather name="more-horizontal" size={18} color={c.subText}/></Pressable></View>
         </Pressable>)}
         {!p.history.length&&<Text style={s.empty}>暂无记录</Text>}
         <View style={s.row}>{p.historyPage>0&&<Pressable style={s.button} onPress={()=>p.changeHistoryPage(-1)}><Text style={s.buttonText}>上一页</Text></Pressable>}{p.history.length===100&&<Pressable style={s.button} onPress={()=>p.changeHistoryPage(1)}><Text style={s.buttonText}>下一页</Text></Pressable>}</View>
@@ -90,7 +91,7 @@ export default function HomeView(p:HomeViewProps) {
     </Modal>
     <Modal visible={!!p.detail} animationType="slide" onRequestClose={p.closeDetail}>
       <View style={s.modal}><View style={s.modalHeader}><Text style={s.modalTitle}>{p.detail?.title}</Text>{closeIcon(p.closeDetail)}</View>
-        {p.detail?.record&&<Text style={[s.hint,{paddingHorizontal:20}]}>{stateName[p.detail.record.status]}{p.detail.record.error?` · ${p.detail.record.error}`:''}</Text>}
+        {p.detail?.record&&<Text style={[s.hint,{paddingHorizontal:20}]}>{p.detail.record.target_name||p.detail.record.target_device} · {stateName[p.detail.record.status]}{p.detail.record.error?` · ${p.detail.record.error}`:''}</Text>}
         <ScrollView><Text selectable style={s.full}>{p.detail?.content}</Text></ScrollView>
         <View style={s.detailActions}><Pressable style={s.button} onPress={p.copyDetail}><Text style={s.buttonText}>复制</Text></Pressable><Pressable style={s.button} onPress={p.editDetail}><Text style={s.buttonText}>编辑</Text></Pressable>{p.detail?.record&&<Pressable style={s.button} onPress={p.deleteDetail}><Text style={s.buttonText}>删除</Text></Pressable>}</View>
       </View>
