@@ -1165,9 +1165,11 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
             if window.label() != "main" {
                 return;
             }
-            if window.is_minimized().unwrap_or(false) || window.is_maximized().unwrap_or(false) {
-                return;
-            }
+            if window.is_minimized().unwrap_or(false) { return; }
+            // Tao's macOS is_maximized temporarily adds a titlebar to borderless
+            // windows, generating another Resized event. Never query it here.
+            #[cfg(not(target_os = "macos"))]
+            if window.is_maximized().unwrap_or(false) { return; }
             persist_window_size(window, size.width, size.height);
         }
         tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -1256,6 +1258,7 @@ fn handle_blur(window: &tauri::Window) {
     if IS_MOUSE_BUTTON_DOWN.load(Ordering::SeqCst) {
         return;
     }
+    #[cfg(windows)]
     unsafe {
         if (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01) as u16 & 0x8000)
             != 0
@@ -1269,8 +1272,9 @@ fn handle_blur(window: &tauri::Window) {
     let w = window.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(200));
-        let down = IS_MOUSE_BUTTON_DOWN.load(Ordering::SeqCst)
-            || unsafe {
+        let down = IS_MOUSE_BUTTON_DOWN.load(Ordering::SeqCst);
+        #[cfg(windows)]
+        let down = down || unsafe {
                 (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01) as u16
                     & 0x8000)
                     != 0

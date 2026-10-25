@@ -6,7 +6,7 @@ pub mod windows_ext;
 #[cfg(target_os = "windows")]
 pub mod windows_api;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub mod windows_api {
     pub mod win_clipboard {
         pub struct ImageData {
@@ -85,5 +85,16 @@ pub mod windows_api {
 
     pub mod drag_drop {
         pub fn register_emoji_drag_drop(_app_handle: tauri::AppHandle) {}
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[path = "macos.rs"]
+pub mod windows_api;
+#[cfg(not(windows))]
+pub mod windows_ext {
+    pub struct WindowExt;
+    impl WindowExt {
+        pub fn show_error_box(title: &str, message: &str) { eprintln!("{title}: {message}"); }
     }
 }

@@ -76,7 +76,7 @@ fn resolve_rich_image_fallback_bytes(payload: &str) -> Option<Vec<u8>> {
 }
 
 fn capture_clipboard_snapshot() -> ClipboardSnapshot {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     unsafe {
         if let Some(files) =
             crate::infrastructure::windows_api::win_clipboard::get_clipboard_files()
@@ -92,7 +92,7 @@ fn capture_clipboard_snapshot() -> ClipboardSnapshot {
         .and_then(|mut clipboard| clipboard.get_text().ok())
         .filter(|value| !value.is_empty());
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         if let Some(text_value) = text.clone() {
             if let Some(html_raw) = unsafe {
@@ -277,7 +277,7 @@ pub async fn paste_text_directly(app_handle: tauri::AppHandle, content: String) 
     }
 
     handle_window_focus_for_paste(&app_handle).await?;
-    send_paste_keystroke("game_mode", Some(&content), Some("text"));
+    send_paste_keystroke("game_mode", Some(&content), Some("text"))?;
     hide_window_after_paste(&app_handle).await;
     play_paste_sound_if_enabled(&app_handle);
 
@@ -409,7 +409,7 @@ async fn handle_window_focus_for_paste(app_handle: &tauri::AppHandle) -> AppResu
     // 1. Only restore focus if our window actually took focus; avoids unnecessary focus flips
     // that can force fullscreen apps into windowed mode.
     if crate::IS_MAIN_WINDOW_FOCUSED.load(Ordering::Relaxed) {
-        let _ = restore_focus_before_paste(app_handle).await;
+        restore_focus_before_paste(app_handle).await?;
     }
 
     // 2. Then handle the specific visibility logic based on pinned state
@@ -432,6 +432,7 @@ async fn handle_window_focus_for_paste(app_handle: &tauri::AppHandle) -> AppResu
     Ok(())
 }
 
+#[cfg(windows)]
 async fn restore_focus_before_paste(_app_handle: &tauri::AppHandle) -> AppResult<()> {
     let last_hwnd_val = crate::LAST_ACTIVE_HWND.load(Ordering::Relaxed);
     if last_hwnd_val == 0 {
@@ -922,7 +923,7 @@ async fn perform_paste_action(
         .unwrap_or_else(|| "shift_insert".to_string());
 
     // Send paste keystroke
-    send_paste_keystroke(&paste_method, content, Some(content_type));
+    send_paste_keystroke(&paste_method, content, Some(content_type))?;
 
     // Hide after paste if not pinned
     hide_window_after_paste(app_handle).await;
@@ -956,7 +957,7 @@ async fn hide_window_after_paste(app_handle: &tauri::AppHandle) {
     }
 }
 
-pub fn send_paste_keystroke(method: &str, content: Option<&str>, content_type: Option<&str>) {
+pub fn send_paste_keystroke(method: &str, content: Option<&str>, content_type: Option<&str>) -> AppResult<()> {
     println!("[DEBUG] Sending paste keystroke using method: {}", method);
     #[cfg(target_os = "windows")]
     unsafe {
@@ -1301,16 +1302,19 @@ pub fn send_paste_keystroke(method: &str, content: Option<&str>, content_type: O
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("osascript")
-            .args([
-                "-e",
-                "tell application \"System Events\" to keystroke \"v\" using command down",
-            ])
-            .spawn()
-            .ok();
+        if method == "game_mode" {
+            if let Some(text) = content { copy_text_once(text).map_err(AppError::Internal)?; }
+        }
+        let result = std::process::Command::new("/usr/bin/osascript")
+            .args(["-e", "tell application \"System Events\" to keystroke \"v\" using command down"])
+            .output().map_err(|e| AppError::Internal(e.to_string()))?;
+        if !result.status.success() {
+            return Err(AppError::Internal("内容已复制，但自动粘贴未获授权。请在系统设置的隐私与安全性中允许 TIEZ Plus 的辅助功能/自动化权限，或手动按 ⌘V。".into()));
+        }
     }
+    Ok(())
 }
 
 fn handle_post_paste_actions(
@@ -1417,4 +1421,11 @@ pub fn paste_latest_rich(app_handle: tauri::AppHandle) {
             }
         }
     });
+}
+
+#[cfg(target_os = "macos")]
+async fn restore_focus_before_paste(app: &tauri::AppHandle) -> AppResult<()> {
+    crate::infrastructure::windows_api::window_tracker::restore_focus(app.clone()).map_err(AppError::Internal)?;
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    Ok(())
 }

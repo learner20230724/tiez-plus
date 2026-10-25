@@ -84,21 +84,11 @@ pub fn listen_clipboard(callback: Arc<dyn Fn() + Send + Sync + 'static>) {
 
     #[cfg(not(target_os = "windows"))]
     std::thread::spawn(move || {
-        let mut last_hash = 0u64;
-        let mut clipboard = arboard::Clipboard::new().unwrap();
+        let mut previous = crate::infrastructure::windows_api::win_clipboard::get_clipboard_sequence_number();
         loop {
-            // Very primitive polling, relies on higher layers to deduplicate properly.
-            if let Ok(text) = clipboard.get_text() {
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                text.hash(&mut hasher);
-                let current_hash = hasher.finish();
-                if current_hash != last_hash {
-                    last_hash = current_hash;
-                    callback();
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            let current = crate::infrastructure::windows_api::win_clipboard::get_clipboard_sequence_number();
+            if current != previous { previous = current; callback(); }
+            std::thread::sleep(std::time::Duration::from_millis(300));
         }
     });
 }

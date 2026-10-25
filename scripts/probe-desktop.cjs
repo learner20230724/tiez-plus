@@ -10,7 +10,10 @@ async function main(){
   const samples=Number(process.argv[2]||1);
   const interval=Number(process.argv[3]||10000);
   if(!Number.isInteger(samples)||samples<1||samples>120||!Number.isInteger(interval)||interval<0||interval>60000)throw new Error('Usage: node scripts/probe-desktop.cjs [samples 1..120] [intervalMs 0..60000]');
-  const endpoint=JSON.parse(fs.readFileSync(path.join(process.env.ProgramData,'TIEZ Plus/broker/endpoint.json'),'utf8'));
+  const endpointFile = process.env.TIEZ_PLUS_ENDPOINT || (process.platform === 'darwin'
+    ? path.join(require('node:os').homedir(), 'Library/Application Support/io.github.learner20230724.tiezplus.desktop/broker/endpoint.json')
+    : path.join(process.env.ProgramData, 'TIEZ Plus/broker/endpoint.json'));
+  const endpoint=JSON.parse(fs.readFileSync(endpointFile,'utf8'));
   const response=await fetch(`http://127.0.0.1:${endpoint.httpPort}/api/v1/enroll`,{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({role:'mobile',deviceId:randomUUID(),name:'Plus startup health probe'}),signal:AbortSignal.timeout(5000),

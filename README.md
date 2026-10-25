@@ -1,5 +1,7 @@
 # TIEZ Plus
 
+macOS Apple Silicon 本地适配见 [docs/MACOS.md](docs/MACOS.md)，构建脚本 `scripts/build-macos.sh`。
+
 独立于旧版 TieZ 的个人局域网剪贴板工具：**先保存，再发送；电脑处理完成才算送达。**
 
 **当前更新：Windows `TIEZ Plus_0.1.0_x64-setup-fix4.exe`，手机 `TIEZ-Plus-0.1.2-arm64-v8a.apk`。** 本次修正标题栏拖动、状态显示和 Win+V 设置回显，改进后台连接恢复；手机只在推送页下拉时读取剪贴板。详见 `docs/USAGE-FIX4.md`。安装升级不需要先卸载、删除历史或关闭杀毒软件。

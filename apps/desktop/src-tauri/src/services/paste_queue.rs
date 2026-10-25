@@ -156,11 +156,15 @@ pub async fn paste_next_step(app_handle: tauri::AppHandle) {
                 false
             };
 
-            crate::services::clipboard_ops::send_paste_keystroke(
+            if let Err(error) = crate::services::clipboard_ops::send_paste_keystroke(
                 &paste_method,
                 Some(&content),
                 Some(&c_type),
-            );
+            ) {
+                app_handle.state::<PasteQueue>().inner().0.lock().unwrap().items.push_front(id);
+                let _ = app_handle.emit("paste-error", error.to_string());
+                return;
+            }
 
             // Settle time
             std::thread::sleep(std::time::Duration::from_millis(20));

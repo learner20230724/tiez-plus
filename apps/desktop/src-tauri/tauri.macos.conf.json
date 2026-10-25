@@ -1,0 +1,35 @@
+{
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "TIEZ Plus",
+        "label": "main",
+        "width": 400,
+        "height": 520,
+        "minWidth": 300,
+        "minHeight": 300,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "skipTaskbar": false,
+        "visible": false,
+        "dragDropEnabled": true,
+        "focusable": true
+      }
+    ]
+  },
+  "bundle": {
+    "targets": [
+      "app"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-",
+      "infoPlist": "Info.macos.plist",
+      "entitlements": "Entitlements.macos.plist"
+    }
+  }
+}

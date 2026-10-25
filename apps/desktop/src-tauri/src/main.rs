@@ -195,6 +195,17 @@ fn main() {
                     // Closing/hiding a webview is not an explicit tray-menu Quit.
                     tauri::RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
                     tauri::RunEvent::ExitRequested { code: Some(code), .. } => info!("[Plus] explicit exit requested code={}", code),
+                    #[cfg(target_os = "macos")]
+                    tauri::RunEvent::Reopen { .. } => {
+                        IS_HIDDEN.store(false, Ordering::Relaxed);
+                        CURRENT_DOCK.store(0, Ordering::Relaxed);
+                        if let Some(window) = _app_handle.get_webview_window("main") {
+                            let _ = window.unminimize();
+                        }
+                        let _ = app::window_manager::focus_clipboard_window(_app_handle.clone());
+                    }
+                    #[cfg(target_os = "macos")]
+                    tauri::RunEvent::Exit => services::plus::macos::stop_broker(),
                     _ => {}
                 }
             });
@@ -210,6 +221,7 @@ fn main() {
     }
 
     // Cleanup Hooks on exit
+    #[cfg(windows)]
     unsafe {
         let h_hook = HOOK_HANDLE.swap(std::ptr::null_mut(), Ordering::SeqCst);
         if !h_hook.is_null() {

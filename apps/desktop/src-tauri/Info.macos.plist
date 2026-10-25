@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>NSLocalNetworkUsageDescription</key><string>TIEZ Plus 通过局域网与手机同步剪贴板和传输文件。</string>
+<key>NSBonjourServices</key><array><string>_tiezplus._tcp</string></array>
+<key>NSAppleEventsUsageDescription</key><string>TIEZ Plus 在你选择粘贴时向目标应用发送粘贴快捷键。</string>
+</dict></plist>

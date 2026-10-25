@@ -445,6 +445,9 @@ const ClipboardSettingsGroup = (props: ClipboardSettingsGroupProps) => {
                             <option value="win">{props.t('quick_paste_modifier_win')}</option>
                         </select>
                     </div>
+                    {navigator.platform.toLowerCase().includes('mac') ? (
+                        <div className="setting-item"><span>粘贴方式</span><span>⌘V（需辅助功能权限）</span></div>
+                    ) : (
                     <div className="setting-item">
                         <props.LabelWithHint
                             label={props.t('paste_method')}
@@ -494,6 +497,7 @@ const ClipboardSettingsGroup = (props: ClipboardSettingsGroupProps) => {
                             <option value="game_mode">{props.t('paste_method_game_mode')}</option>
                         </select>
                     </div>
+                    )}
                     <div className="setting-item">
                         <props.LabelWithHint
                             label={props.t('sequential_paste_mode')}
@@ -814,6 +818,7 @@ const ClipboardSettingsGroup = (props: ClipboardSettingsGroupProps) => {
                         </div>
                     )}
 
+                    {navigator.platform.toLowerCase().includes('win') && (
                     <div className="setting-item">
                         <props.LabelWithHint
                             label={props.t('use_win_v_shortcut')}
@@ -893,6 +898,7 @@ const ClipboardSettingsGroup = (props: ClipboardSettingsGroupProps) => {
                             <div className="toggle"><div className="left" /><div className="right" /></div>
                         </label>
                     </div>
+                    )}
                 </div>
             )}
         </div>

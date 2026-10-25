@@ -372,7 +372,9 @@ pub fn toggle_window(app: &AppHandle) {
 
         #[cfg(not(windows))]
         {
+            let _ = window.set_focusable(true);
             let _ = window.show();
+            let _ = window.set_focus();
         }
     }
 }

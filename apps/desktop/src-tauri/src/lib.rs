@@ -29,3 +29,7 @@ mod plus_session_tests;
 #[cfg(test)]
 #[path = "services/file_transfer/security.rs"]
 mod plus_transfer_security_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "infrastructure/encryption.rs"]
+mod mac_encryption_tests;
