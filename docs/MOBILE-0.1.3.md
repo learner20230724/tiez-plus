@@ -15,3 +15,5 @@
 Mac 构建脚本为 `scripts/build-android-macos-test.sh`，使用仓库 `.runtime` 中的 JDK 17 和 Android SDK。签名保存在本机 `.secrets`，不会提交到 Git。输出为 `artifacts/TIEZ-Plus-Test-0.1.3-arm64-v8a.apk`。
 
 代码通过 TypeScript 检查与真实 SQLite、双 MQTT 服务的测试。物理手机上的长按交互和多电脑网络发现仍需安装后验收。
+
+本机构建结果：Release APK 构建成功，v2 签名校验通过；确认包名、版本号、arm64-v8a 架构及包内新版广播、删除和待发送迁移逻辑。58 项自动测试通过，8 项 Windows 测试跳过；尚未安装到物理手机验收。

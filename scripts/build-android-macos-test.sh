@@ -22,7 +22,7 @@ fi
 cd apps/mobile
 node node_modules/expo/bin/cli prebuild --platform android --no-install
 cd android
-./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8'
+./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2 --info '-Dorg.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8'
 cd ../../..
 cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk artifacts/TIEZ-Plus-Test-0.1.3-arm64-v8a.apk
 "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose artifacts/TIEZ-Plus-Test-0.1.3-arm64-v8a.apk
