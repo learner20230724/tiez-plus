@@ -25,7 +25,7 @@ test('every recipient is durable, exact text and new edits survive independent a
   const rows=await store.prepareBroadcast([d],[endpoint('a'),endpoint('b'),endpoint('a')]);
   assert.equal(rows.length,2);assert.notEqual(rows[0].id,rows[1].id);
   assert((await store.history()).every(r=>r.content===d.content));
-  assert.equal((await store.drafts())[0].content,'');
+  assert.equal((await store.drafts())[0].content,d.content);
   await store.saveDraft({...d,content:'new edit',revision:3});
   await store.applyResult(rows[0].id,endpoint('b'),'delivered');
   assert.equal((await store.getRecord(rows[0].id)).status,'saved');
@@ -33,7 +33,7 @@ test('every recipient is durable, exact text and new edits survive independent a
   await store.markUnconfirmed(rows[1].id,'offline');
   assert.deepEqual((await store.history()).map(r=>r.status).sort(),['delivered','unconfirmed']);
   assert.equal((await store.drafts())[0].content,'new edit');
-  assert.deepEqual(new Set((await store.listHistory()).map(r=>r.target_name)),new Set(['a','b']));
+  assert.deepEqual(new Set((await store.listHistory()).map(r=>r.target_name)),new Set(['a']));
 });
 test('second recipient write failure rolls back all records and preserves the saved draft',async t=>{
   const {adapter,store}=database(t);await store.init();const d=draft();await store.saveDraft(d);
@@ -42,23 +42,20 @@ test('second recipient write failure rolls back all records and preserves the sa
   await assert.rejects(store.prepareBroadcast([d],[endpoint('a'),endpoint('b')]),/disk full/);
   assert.equal((await store.history()).length,0);assert.equal((await store.drafts())[0].content,d.content);
 });
-test('retry keeps original recipient and message ID even when other computers are discovered',async t=>{
-  const {store}=database(t);await store.init();
-  const [a,b]=await store.prepareBroadcast([draft()],[endpoint('a'),endpoint('b')]);
-  await store.applyResult(a.id,endpoint('a'),'delivered');await store.markUnconfirmed(b.id,'timeout');
-  const retry=await store.queueHistory(b.id);
-  const [again]=await store.prepareBroadcast([retry],[endpoint('a'),endpoint('c')]);
-  assert.equal(again.id,b.id);assert.equal(again.target_instance,'b');assert.equal((await store.history()).length,2);
-  // Already delivered history explicitly added again is a new broadcast.
-  const fresh=await store.queueHistory(a.id);const resend=await store.prepareBroadcast([fresh],[endpoint('a'),endpoint('c')]);
-  assert.equal(resend.length,2);assert(resend.every(r=>r.id!==a.id));
+test('partial success retains home content; another click broadcasts to current targets without original-device restriction',async t=>{
+ const {store}=database(t);await store.init();const d=draft();
+ const rows=await store.prepareBroadcast([d],[endpoint('a'),endpoint('b')]);
+ await store.applyResult(rows[0].id,endpoint('a'),'delivered');
+ assert.equal((await store.finishBroadcast([d],rows)).length,0);
+ assert.equal((await store.drafts())[0].content,d.content);
+ const again=await store.prepareBroadcast([d],[endpoint('a'),endpoint('c')]);
+ assert.deepEqual(again.map(r=>r.target_instance),['a','c']);
+ for(const r of again)await store.applyResult(r.id,{instanceId:r.target_instance,desktopId:r.target_device},'delivered');
+ assert.equal((await store.finishBroadcast([d],again)).length,1);assert.equal((await store.drafts())[0].content,'');
 });
-test('no discovered computers keeps the draft intact; explicit retry still retains its original target',async t=>{
-  const {store}=database(t);await store.init();const d=draft();await store.saveDraft(d);
-  await assert.rejects(store.prepareBroadcast([d],[]),/尚未发现/);
-  assert.equal((await store.drafts())[0].content,d.content);
-  const [row]=await store.prepareBroadcast([d],[endpoint('a')]);const retry=await store.queueHistory(row.id);
-  assert.equal((await store.prepareBroadcast([retry],[]))[0].id,row.id);
+test('no discovered computers keeps the draft intact',async t=>{
+ const {store}=database(t);await store.init();const d=draft();await store.saveDraft(d);
+ await assert.rejects(store.prepareBroadcast([d],[]),/尚未发现/);assert.equal((await store.drafts())[0].content,d.content);
 });
 test('fan-out isolates failures, preserves draft order per computer, limits simultaneous computers',async()=>{
   const records=Array.from({length:7},(_,i)=>[0,1,2].map(n=>({id:`${i}-${n}`,target_instance:`${i}`,target_device:`pc-${i}`}))).flat();

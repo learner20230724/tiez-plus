@@ -81,15 +81,24 @@ export default function PlusHome() {
     pushingRef.current=true;setPushing(true);
     try {
       await flush();
-      const sent=await sendDrafts(chosen,()=>{
-        // The history transaction has committed. Never clear unsaved or newer edits.
-        const archived=clearArchivedDrafts(draftsRef.current,chosen);
+      const sent=await sendDrafts(chosen,completed=>{
+        // Clear only fully delivered snapshots; failed or newer content stays on home.
+        const archived=clearArchivedDrafts(draftsRef.current,completed);
         update(archived.drafts);setSelected(ids=>ids.filter(id=>!archived.deselect.includes(id)));
-        toast('已存入历史');
+        toast('成功的内容已存入历史');
       });
       triggerHaptic('success');toast(`已送达 ${sent.computers} 台电脑`);
     } catch(error) {showError(error);}
     finally {pushingRef.current=false;setPushing(false);await reload().catch(()=>{});}
+  }
+  function deleteDraft(id:string) {
+    Alert.alert('删除这条内容？','删除后不再保留在待推送列表。',[
+      {text:'取消',style:'cancel'},
+      {text:'删除',style:'destructive',onPress:()=>{void (async()=>{
+        await flush();await runtime.store!.discardDraft(id);
+        update(draftsRef.current.filter(d=>d.id!==id));setSelected(ids=>ids.filter(x=>x!==id));
+      })().catch(showError);}},
+    ]);
   }
   async function pullNow() {
     if(refreshingRef.current)return; refreshingRef.current=true;setRefreshing(true);setPullError('');
@@ -162,7 +171,7 @@ export default function PlusHome() {
     const show=Keyboard.addListener(Platform.OS==='ios'?'keyboardWillShow':'keyboardDidShow',()=>setKeyboard(true));
     const hide=Keyboard.addListener(Platform.OS==='ios'?'keyboardWillHide':'keyboardDidHide',()=>setKeyboard(false));
     const handleLink=async({url}:{url:string})=>{
-      if(!url.startsWith('tiezplus://'))return;
+      if(!url.startsWith('tiezplus://')&&!url.startsWith('tiezplustest://'))return;
       await boot;
       if(url.includes('sync-pull')) {setMode('pull');await pullNow();}
       else if(url.includes('sync-push')||url.includes('sync-now')) {setMode('push');}
@@ -175,7 +184,7 @@ export default function PlusHome() {
   const visibleDetail=detail?.remoteTarget && (!runtime.selected || detail.remoteTarget!==targetKey(runtime.selected))?null:detail;
   return <HomeView colors={colors} top={insets.top} bottom={insets.bottom} keyboard={keyboard} loading={loading} mode={mode}
     setMode={next=>{run(flush);setMode(next);if(next==='pull')void pullNow();}}
-    drafts={drafts} selected={selected} edit={edit} toggle={id=>setSelected(ids=>ids.includes(id)?ids.filter(x=>x!==id):[...ids,id])}
+    drafts={drafts} deleteDraft={deleteDraft} selected={selected} edit={edit} toggle={id=>setSelected(ids=>ids.includes(id)?ids.filter(x=>x!==id):[...ids,id])}
     selectAll={()=>{const ids=draftsRef.current.filter(d=>d.content.length>0).map(d=>d.id);setSelected(old=>ids.every(id=>old.includes(id))?[]:ids);}}
     push={()=>void push()} pushing={pushing} refreshing={refreshing} refresh={()=>void refresh()} saveLabel={saveLabel} feedback={feedback}
     pull={visiblePull} pullError={pullError} offline={!runtime.ready} copyCurrent={()=>{if(isPullTarget(pull,runtime.selected) && typeof pull?.current.content==='string')run(()=>copy(pull.current.content!));else toast(visiblePull?.current.error||'没有文字');}}

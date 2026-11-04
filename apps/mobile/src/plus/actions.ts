@@ -6,7 +6,7 @@ export function clearArchivedDrafts(current: Draft[], sent: Draft[]): {drafts: D
     const before = snapshots.get(d.id);
     if (!before || before.revision !== d.revision || before.content !== d.content) return d;
     deselect.push(d.id);
-    return d.kind === 'clipboard' ? d : {...d, content:'', revision:d.revision+1, source_outbox_id:null};
+    return {...d, content:'', revision:d.revision+1, source_outbox_id:null};
   });
   return {drafts, deselect};
 }

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
@@ -12,7 +12,7 @@ export const stateName: Record<string,string> = {saved:'待推送',sending:'发�
 export type HomeViewProps = {
   colors:typeof Colors.light; top:number; bottom:number; keyboard:boolean; loading:boolean;
   mode:'push'|'pull'; setMode:(mode:'push'|'pull')=>void;
-  drafts:Draft[]; selected:string[]; edit:(id:string,text:string)=>void; toggle:(id:string)=>void; selectAll:()=>void;
+  drafts:Draft[]; deleteDraft?:(id:string)=>void; selected:string[]; edit:(id:string,text:string)=>void; toggle:(id:string)=>void; selectAll:()=>void;
   push:()=>void; pushing:boolean; refreshing:boolean; refresh:()=>void; saveLabel:string; feedback:string;
   pull:PullCache|null; pullError:string; offline:boolean; copyCurrent:()=>void; copyRemote:(e:RemoteEntry)=>void; viewRemote:(e:RemoteEntry)=>void;
   historyOpen:boolean; openHistory:()=>void; closeHistory:()=>void; history:OutboxSummary[]; search:string; searchHistory:(q:string)=>void; historyPage:number; changeHistoryPage:(delta:number)=>void;
@@ -22,6 +22,7 @@ export type HomeViewProps = {
 
 export default function HomeView(p:HomeViewProps) {
   const {colors:c}=p;
+  const hold=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
   const s=useMemo(()=>StyleSheet.create({
     root:{flex:1,backgroundColor:c.background},chrome:{paddingTop:p.top,paddingHorizontal:20,paddingBottom:2},header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingTop:14,paddingBottom:18},
     title:{fontSize:36,fontWeight:'700',color:c.text,letterSpacing:.5},historyButton:{flexDirection:'row',alignItems:'center',gap:6,padding:10},small:{color:c.subText,fontSize:12,lineHeight:18},
@@ -44,16 +45,16 @@ export default function HomeView(p:HomeViewProps) {
     </View>
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={p.refreshing} onRefresh={p.refresh} tintColor={c.text}/> }>
       {p.loading ? <ActivityIndicator color={c.text} style={{marginTop:40}}/> : p.mode==='push' ? <>
-        <Text style={s.hint}>推送到局域网内所有已发现的电脑；失败记录重试只发给原电脑。</Text>
-        <Pressable testID="clipboard-card" accessibilityLabel="当前手机剪贴板" onPress={()=>clipboard?.content&&p.toggle(clipboard.id)} onLongPress={()=>clipboard?.content&&p.showDetail({title:'手机剪贴板',content:clipboard.content})} style={[s.card,clipboard&&p.selected.includes(clipboard.id)&&s.selected]}>
+        <Text style={s.hint}>推送到局域网内所有已发现的电脑；未完成的内容留在此处，长按可删除。</Text>
+        <Pressable testID="clipboard-card" accessibilityLabel="当前手机剪贴板" onPress={()=>clipboard?.content&&p.toggle(clipboard.id)} onLongPress={()=>clipboard&&p.deleteDraft?.(clipboard.id)} style={[s.card,clipboard&&p.selected.includes(clipboard.id)&&s.selected]}>
           <Text testID="clipboard-preview" numberOfLines={3} ellipsizeMode="tail" style={s.body}>{clipboard?.content || '下拉读取手机最新剪贴板'}</Text>
           <View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>下拉更新剪贴板</Text>{clipboard?.content ? check(clipboard.id):null}</View>
         </Pressable>
-        {queued.map(d=><Pressable key={d.id} accessibilityLabel="待推送记录" style={[s.card,p.selected.includes(d.id)&&s.selected]} onPress={()=>p.toggle(d.id)} onLongPress={()=>p.showDetail({title:'待推送内容',content:d.content,draft:d})}>
-          <Text numberOfLines={3} style={s.body}>{d.content}</Text><View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>{d.kind==='retry'?'重试原电脑':'待推送到所有电脑'}</Text>{check(d.id)}</View>
+        {queued.map(d=><Pressable key={d.id} accessibilityLabel="待推送记录" style={[s.card,p.selected.includes(d.id)&&s.selected]} onPress={()=>p.toggle(d.id)} onLongPress={()=>p.deleteDraft?.(d.id)}>
+          <Text numberOfLines={3} style={s.body}>{d.content}</Text><View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>{'待推送到所有电脑'}</Text>{check(d.id)}</View>
         </Pressable>)}
         {editorRows(p.drafts).map((d,index)=><View key={d.id} style={[s.card,{padding:4},p.selected.includes(d.id)&&d.content.length>0&&s.selected]}>
-          <TextInput accessibilityLabel={`输入内容 ${index+1}`} multiline scrollEnabled value={d.content} onChangeText={text=>p.edit(d.id,text)} placeholder={index===0?'在此输入内容…':'继续输入下一条…'} placeholderTextColor={c.subText} style={s.input}/>
+          <TextInput onPressIn={()=>{clearTimeout(hold.current);hold.current=setTimeout(()=>p.deleteDraft?.(d.id),700);}} onPressOut={()=>clearTimeout(hold.current)} accessibilityLabel={`输入内容 ${index+1}`} multiline scrollEnabled value={d.content} onChangeText={text=>p.edit(d.id,text)} placeholder={index===0?'在此输入内容…':'继续输入下一条…'} placeholderTextColor={c.subText} style={s.input}/>
           {!!d.content.length&&<Pressable accessibilityRole="checkbox" accessibilityLabel={`选择输入 ${index+1}`} accessibilityState={{checked:p.selected.includes(d.id)}} onPress={()=>p.toggle(d.id)} style={s.indicator}>{check(d.id)}</Pressable>}
         </View>)}
       </> : <>
@@ -81,7 +82,7 @@ export default function HomeView(p:HomeViewProps) {
     <Modal visible={p.historyOpen} animationType="slide" onRequestClose={p.closeHistory}>
       <View style={s.modal}><View style={s.modalHeader}><Text style={s.modalTitle}>手机历史</Text>{closeIcon(p.closeHistory)}</View><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingHorizontal:20,paddingBottom:24}}>
         <TextInput accessibilityLabel="搜索手机历史" value={p.search} onChangeText={p.searchHistory} placeholder="搜索历史" placeholderTextColor={c.subText} style={s.search}/>
-        <Text style={s.hint}>点击加入待推送 · 长按查看全文；未送达记录仅重试原电脑</Text>
+        <Text style={s.hint}>这里只显示已送达记录 · 点击重新加入待推送</Text>
         {p.history.map(r=><Pressable key={r.id} accessibilityLabel="加入待推送" style={s.card} onPress={()=>p.queueHistory(r.id)} onLongPress={()=>p.viewHistory(r.id)}>
           <Text style={s.hint}>{r.target_name||r.target_device}</Text><Text numberOfLines={3} style={s.body}>{r.preview}</Text><View style={[s.row,{justifyContent:'space-between',marginTop:8}]}><Text style={s.small}>{stateName[r.status]||r.status} · {new Date(r.created_at).toLocaleString()}</Text><Pressable accessibilityLabel="查看历史详情" onPress={e=>{e.stopPropagation();p.viewHistory(r.id);}} style={{padding:6}}><Feather name="more-horizontal" size={18} color={c.subText}/></Pressable></View>
         </Pressable>)}

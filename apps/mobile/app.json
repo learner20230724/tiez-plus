@@ -2,7 +2,7 @@
   "expo": {
     "name": "TIEZ Plus",
     "slug": "tiez-plus",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "scheme": "tiezplus",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -63,7 +63,7 @@
         "android.permission.ACCESS_WIFI_STATE",
         "android.permission.CHANGE_WIFI_MULTICAST_STATE"
       ],
-      "versionCode": 3,
+      "versionCode": 4,
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW"

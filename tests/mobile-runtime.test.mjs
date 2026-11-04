@@ -68,18 +68,14 @@ test('runtime broadcasts to two brokers while pull follows only the settings sel
   assert.equal((await actions.readComputer(r.runtime.connection)).current.content,'B clipboard');
   assert.equal((await r.runtime.store.history()).filter(x=>x.status==='delivered').length,4);
 });
-test('partial delivery is not success; retry only sends the failed original recipient with the same ID',async t=>{
-  const a=await computer(t,'A'),b=await computer(t,'B'),r=await runtimeHarness(t);discovered(r,a,b);b.fail=true;
-  await r.connect(a.endpoint);
-  await assert.rejects(r.sendDrafts([draft('partial')]),/1\/2/);
-  const rows=await r.runtime.store.history();const failed=rows.find(x=>x.target_instance===b.endpoint.instanceId);
-  assert.equal(failed.status,'copy_failed');assert.equal(rows.find(x=>x.target_instance===a.endpoint.instanceId).status,'delivered');
-  b.fail=false;const retry=await r.runtime.store.queueHistory(failed.id);
-  const sent=await r.sendDrafts([retry]);assert.equal(sent.computers,1);
-  assert.equal(a.requests.filter(x=>x.type==='send_text').length,1);
-  const attempts=b.requests.filter(x=>x.type==='send_text');assert.equal(attempts.length,2);assert(attempts.every(x=>x.id===failed.id));
-  // A late ACK after retry is queued must prevent even an explicit stale retry from resending.
-  await r.sendDrafts([retry]);assert.equal(b.requests.filter(x=>x.type==='send_text').length,2);
+test('partial delivery retains home contents; pushing again sends to all current computers',async t=>{
+ const a=await computer(t,'A'),b=await computer(t,'B'),r=await runtimeHarness(t);discovered(r,a,b);b.fail=true;
+ const d=draft('partial');await r.connect(a.endpoint);
+ await assert.rejects(r.sendDrafts([d]),/1\/2/);
+ assert.equal((await r.runtime.store.listHistory()).length,1);assert.equal((await r.runtime.store.drafts())[0].content,d.content);
+ b.fail=false;await r.sendDrafts([d]);
+ for(const c of [a,b])assert.equal(c.requests.filter(x=>x.type==='send_text').length,2);
+ assert.equal((await r.runtime.store.drafts())[0].content,'');
 });
 test('broadcast works before selecting a pull computer; stopping discovery closes all connections',async t=>{
   const a=await computer(t,'A'),b=await computer(t,'B'),r=await runtimeHarness(t);discovered(r,a,b);
@@ -92,9 +88,9 @@ test('broadcast works before selecting a pull computer; stopping discovery close
 test('a background/foreground transition cannot resume the remaining records of an old push',async t=>{
   const a=await computer(t,'A'),b=await computer(t,'B'),r=await runtimeHarness(t);discovered(r,a,b);
   let restart;
-  await assert.rejects(r.sendDrafts([draft('cancel-one'),draft('cancel-two')],()=>{
-    r.stopDiscovery();restart=r.startDiscovery();
-  }),/0\/4/);
+  const prepare=r.runtime.store.prepareBroadcast.bind(r.runtime.store);
+  r.runtime.store.prepareBroadcast=async(...args)=>{const rows=await prepare(...args);r.stopDiscovery();restart=r.startDiscovery();return rows;};
+  await assert.rejects(r.sendDrafts([draft('cancel-one'),draft('cancel-two')]),/0\/4/);
   await restart;
   assert.equal(a.requests.filter(x=>x.type==='send_text').length,0);
   assert.equal(b.requests.filter(x=>x.type==='send_text').length,0);

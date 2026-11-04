@@ -20,10 +20,10 @@ async function setup(t,legacy=false) {
   const store=new storage.PlusStore(adapter,randomUUID);await store.init();return {store,db,adapter};
 }
 test('mobile update migrates the old SQLite draft schema without losing text',async t=>{
-  const {store}=await setup(t,true);const old=(await store.drafts())[0];
+  const {store}=await setup(t,true);const old=(await store.drafts()).find(d=>d.id==='old');
   assert.equal(old.content,'旧草稿  🙂');assert.equal(old.revision,7);assert.equal(old.kind,'input');
   const record=await store.getRecord('old-message');assert.equal(record.content,'旧版未确认文字  🙂');assert.equal(record.status,'unconfirmed');assert.equal(record.attempts,1);
-  await store.init();assert.equal((await store.drafts()).length,1);
+  await store.init();assert.equal((await store.drafts()).length,2);assert.equal((await store.listHistory()).length,0);
 });
 
 test('Android packaging reads UTF-8 version metadata and does not overwrite the previous APK',()=>{
@@ -58,29 +58,26 @@ test('archive commit and late ACK do not erase text edited during submission',as
   assert.equal(actions.clearArchivedDrafts([edited],[original]).drafts[0].content,'new');
   const cleared=actions.clearArchivedDrafts([original,draft('b','keep')],[original]);assert.equal(cleared.drafts[0].content,'');assert.equal(cleared.drafts[1].content,'keep');assert.deepEqual(cleared.deselect,['a']);
 });
-test('history tap queues full text only, persists across restart, and reuses failed message ID',async t=>{
-  const {store}=await setup(t);const body='  原文\n'.repeat(10000);const [out]=await store.prepare([draft('a',body)],target,true);await store.markUnconfirmed(out.id,'offline');
-  const queued=await store.queueHistory(out.id);assert.equal(queued.content,body);assert.equal(queued.kind,'retry');assert.equal((await store.getRecord(out.id)).attempts,0);
-  assert.equal((await store.queueHistory(out.id)).id,queued.id);assert.equal((await store.history()).length,1);
-  await store.init();const recovered=(await store.drafts()).find(d=>d.id===queued.id);assert.equal(recovered.source_outbox_id,out.id);
-  const [retry]=await store.prepare([recovered],target,true);assert.equal(retry.id,out.id);assert.equal((await store.history()).length,1);
+test('pending contents remain on home and can be sent to a newly chosen computer',async t=>{
+  const {store}=await setup(t);const a=draft('a','keep me');
+  const [old]=await store.prepareBroadcast([a],[target]);await store.markUnconfirmed(old.id,'offline');
+  assert.equal((await store.listHistory()).length,0);assert.equal((await store.drafts())[0].content,a.content);
+  const other={instanceId:'other',desktopId:'new'};
+  const [next]=await store.prepareBroadcast([a],[other]);assert.equal(next.target_instance,'other');assert.notEqual(next.id,old.id);
+  await store.applyResult(next.id,other,'delivered');await store.finishBroadcast([a],[next]);
+  assert.equal((await store.drafts())[0].content,'');assert.equal((await store.listHistory()).length,1);
 });
-test('late delivery while retry is queued does not silently create a second delivery',async t=>{
-  const {store}=await setup(t);const [out]=await store.prepare([draft('a','text')],target,true);const queued=await store.queueHistory(out.id);
-  await store.applyResult(out.id,target,'delivered');const [retry]=await store.prepare([queued],target,true);assert.equal(retry.id,out.id);
-  const successful=await store.queueHistory(out.id);assert.equal(successful.kind,'history');const [again]=await store.prepare([successful],target,true);assert.notEqual(again.id,out.id);
-});
-test('failed history records cannot be pushed to an unintended computer',async t=>{
-  const {store}=await setup(t);const [out]=await store.prepare([draft('a','original destination')],target,true);const queued=await store.queueHistory(out.id);
-  await assert.rejects(store.prepare([queued],{...target,instanceId:'other'},true),/原来的电脑/);
-  assert.equal((await store.drafts()).find(d=>d.id===queued.id).content,queued.content);
+test('delete leaves a tombstone against stale autosaves and never restores on restart',async t=>{
+  const {store}=await setup(t);const a=draft('a','delete');await store.saveDraft(a);
+  await store.prepareBroadcast([a],[target]);await store.discardDraft(a.id);await store.saveDraft(a);await store.init();
+  assert(!(await store.drafts()).some(d=>d.content==='delete'));
 });
 test('automatic clipboard capture keeps full text and preserves unarchived old clipboard text',async t=>{
   const {store}=await setup(t);const full='  手机剪贴板\n'.repeat(10000);const first=await store.captureClipboard(full);
   assert.equal(first.content,full);assert.equal((await store.captureClipboard(full)).id,first.id);
   const second=await store.captureClipboard('second');assert.equal((await store.drafts()).find(d=>d.id===first.id).content,full);
   await store.prepare([second],target,true);await store.captureClipboard('third');
-  assert.equal((await store.drafts()).find(d=>d.id===second.id).content,'');assert.equal((await store.history())[0].content,'second');
+  assert.equal((await store.drafts()).find(d=>d.id===second.id).content,'second');assert.equal((await store.history())[0].content,'second');
 });
 test('home presentation stays themed and compact, and row clicks have distinct meanings',()=>{
   const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');

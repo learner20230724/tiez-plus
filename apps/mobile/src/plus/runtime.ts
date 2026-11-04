@@ -176,18 +176,20 @@ export async function sendRecord(record: Outbox, targets = pushTargets(), genera
     notify(); throw error;
   }
 }
-export async function sendDrafts(drafts: Draft[], onArchived?: (rows: Outbox[]) => void) {
+export async function sendDrafts(drafts: Draft[], onCompleted?: (drafts: Draft[]) => void) {
   const generation = discoveryGeneration;
   await init();
   const targets = pushTargets(); // Freeze recipients for this explicit button press.
   for (const d of drafts) await runtime.store!.saveDraft(d);
   if (!active || generation !== discoveryGeneration) throw new Error('连接已停止；草稿已保存，请回到前台后手动推送');
   const rows = await runtime.store!.prepareBroadcast(drafts, targets);
-  onArchived?.(rows); notify();
+  notify();
   const result = await deliverBroadcast(rows, row => sendRecord(row, targets, generation));
+  const completed = await runtime.store!.finishBroadcast(drafts, rows);
+  onCompleted?.(completed); notify();
   if (result.failures.length) {
     const first = result.failures[0];
-    throw new Error(`已确认 ${result.delivered}/${result.total} 条送达（共 ${result.computers} 台电脑）；未确认的记录保留在历史中。${first.record.target_name || first.record.target_device}：${first.error}`);
+    throw new Error(`已确认 ${result.delivered}/${result.total} 条送达（共 ${result.computers} 台电脑）；未完成的内容保留在首页，可重新推送到当前所有电脑。${first.record.target_name || first.record.target_device}：${first.error}`);
   }
   return result;
 }

@@ -42,7 +42,7 @@ const withAndroidShortcuts = (config, options = {}) => {
   const shortcuts =
     Array.isArray(options.shortcuts) && options.shortcuts.length > 0
       ? options.shortcuts
-      : DEFAULT_SHORTCUTS;
+      : DEFAULT_SHORTCUTS.map(s=>({...s,data:s.data.replace('tiezplus:',`${config.scheme || 'tiezplus'}:`)}));
 
   config = withStringsXml(config, (config) => {
     const stringItems = shortcuts.flatMap((shortcut) => [

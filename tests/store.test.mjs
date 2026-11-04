@@ -31,7 +31,7 @@ test('only acknowledged unchanged draft clears; failed one stays; stale autosave
   const {db,store}=setup();t.after(()=>db.close());await store.init();
   const a={id:'a',content:'success',revision:1,updated_at:1}, b={id:'b',content:'failed',revision:1,updated_at:1};
   const [ra,rb]=await store.prepare([a,b],target);
-  await store.applyResult(ra.id,target,'delivered');await store.applyResult(rb.id,target,'copy_failed','busy');await store.saveDraft(a);
+  await store.applyResult(ra.id,target,'delivered');await store.applyResult(rb.id,target,'copy_failed','busy');await store.finishBroadcast([a,b],[ra,rb]);await store.saveDraft(a);
   const rows=await store.drafts();assert.equal(rows.find(d=>d.id==='a').content,'');assert.equal(rows.find(d=>d.id==='b').content,'failed');
 });
 test('failed write rolls back outbox and prevents network eligibility',async t=>{
@@ -60,6 +60,7 @@ test('history pages use summaries but search and detail read the complete origin
   const {db,store}=setup();t.after(()=>db.close());await store.init();
   const content='前'.repeat(400)+'全文搜索命中'+'尾'.repeat(10000);
   const [record]=await store.prepare([{id:'a',content,revision:1,updated_at:1}],target);
+  await store.applyResult(record.id,target,'delivered');
   const rows=await store.listHistory('全文搜索命中');
   assert.equal(rows.length,1);assert.equal(rows[0].preview.length,300);assert.equal(rows[0].content,undefined);
   assert.equal((await store.getRecord(record.id)).content,content);
