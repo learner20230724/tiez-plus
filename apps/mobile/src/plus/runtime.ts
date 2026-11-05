@@ -184,12 +184,21 @@ export async function sendDrafts(drafts: Draft[], onCompleted?: (drafts: Draft[]
   if (!active || generation !== discoveryGeneration) throw new Error('连接已停止；草稿已保存，请回到前台后手动推送');
   const rows = await runtime.store!.prepareBroadcast(drafts, targets);
   notify();
-  const result = await deliverBroadcast(rows, row => sendRecord(row, targets, generation));
-  const completed = await runtime.store!.finishBroadcast(drafts, rows);
-  onCompleted?.(completed); notify();
-  if (result.failures.length) {
-    const first = result.failures[0];
-    throw new Error(`已确认 ${result.delivered}/${result.total} 条送达（共 ${result.computers} 台电脑）；未完成的内容保留在首页，可重新推送到当前所有电脑。${first.record.target_name || first.record.target_device}：${first.error}`);
-  }
+  const completedIds = new Set<string>();
+  const acknowledge = async () => {
+    const completed = await runtime.store!.finishBroadcast(drafts, rows);
+    const newlyCompleted = completed.filter(d => !completedIds.has(d.id));
+    for (const d of newlyCompleted) completedIds.add(d.id);
+    if (newlyCompleted.length) onCompleted?.(newlyCompleted);
+    notify();
+  };
+  // Clear each content item after its first confirmed recipient, without waiting for sleeping peers.
+  const result = await deliverBroadcast(rows, async row => {
+    await sendRecord(row, targets, generation);
+    await acknowledge();
+  });
+  await acknowledge();
+  const unsent = drafts.filter(d => !completedIds.has(d.id));
+  if (unsent.length) throw new Error(`${unsent.length} 条内容尚未送达任何电脑，已保留在首页`);
   return result;
 }

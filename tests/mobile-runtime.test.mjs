@@ -41,10 +41,10 @@ async function computer(t,name) {
   const client=mqtt.connect(`mqtt://127.0.0.1:${endpoint.mqttPort}`,{clientId:creds.deviceId,username:creds.deviceId,password:creds.token,reconnectPeriod:0});
   const state={endpoint,requests:[],fail:false,afterSend:null};
   await new Promise((resolve,reject)=>{client.once('error',reject);client.once('connect',()=>client.subscribe(P.requestTopic(endpoint.instanceId,endpoint.desktopId),{qos:1},e=>e?reject(e):resolve()));});
-  client.on('message',(_topic,bytes)=>{
+  client.on('message',async(_topic,bytes)=>{
     const req=JSON.parse(bytes);state.requests.push(req);
     let result={ok:true};
-    if(req.type==='send_text'){result={status:state.fail?'copy_failed':'delivered',error:state.fail?'busy':undefined};state.afterSend?.();}
+    if(req.type==='send_text'){result={status:state.fail?'copy_failed':'delivered',error:state.fail?'busy':undefined};state.afterSend?.();await state.delayResponse;}
     else if(req.type==='delivery_status')result={status:'not_found'};
     else if(req.type==='get_current'||req.type==='get_content')result={ok:true,content:`${name} clipboard`};
     else if(req.type==='get_history')result={ok:true,entries:[]};
@@ -68,14 +68,24 @@ test('runtime broadcasts to two brokers while pull follows only the settings sel
   assert.equal((await actions.readComputer(r.runtime.connection)).current.content,'B clipboard');
   assert.equal((await r.runtime.store.history()).filter(x=>x.status==='delivered').length,4);
 });
-test('partial delivery retains home contents; pushing again sends to all current computers',async t=>{
+test('one recipient succeeds without an error and clears home before another recipient finishes',async t=>{
  const a=await computer(t,'A'),b=await computer(t,'B'),r=await runtimeHarness(t);discovered(r,a,b);b.fail=true;
  const d=draft('partial');await r.connect(a.endpoint);
- await assert.rejects(r.sendDrafts([d]),/1\/2/);
- assert.equal((await r.runtime.store.listHistory()).length,1);assert.equal((await r.runtime.store.drafts())[0].content,d.content);
- b.fail=false;await r.sendDrafts([d]);
- for(const c of [a,b])assert.equal(c.requests.filter(x=>x.type==='send_text').length,2);
+ let release; b.delayResponse=new Promise(resolve=>{release=resolve;});
+ t.after(()=>release());
+ let confirmed;const confirmation=new Promise(resolve=>{confirmed=resolve;});
+ const completed=[];const sending=r.sendDrafts([d],items=>{completed.push(...items);confirmed();});
+ await confirmation;
  assert.equal((await r.runtime.store.drafts())[0].content,'');
+ release();await sending;
+ assert.equal(completed.length,1);assert.equal(completed[0].id,d.id);
+ assert.equal((await r.runtime.store.listHistory()).length,1);assert.equal((await r.runtime.store.drafts())[0].content,'');
+ for(const c of [a,b])assert.equal(c.requests.filter(x=>x.type==='send_text').length,1);
+});
+test('all recipients fail: no content is cleared and a no-delivery error is returned',async t=>{
+ const a=await computer(t,'A'),b=await computer(t,'B'),r=await runtimeHarness(t);discovered(r,a,b);a.fail=true;b.fail=true;
+ const d=draft('failed');await assert.rejects(r.sendDrafts([d]),/尚未送达任何电脑/);
+ assert.equal((await r.runtime.store.drafts())[0].content,d.content);assert.equal((await r.runtime.store.listHistory()).length,0);
 });
 test('broadcast works before selecting a pull computer; stopping discovery closes all connections',async t=>{
   const a=await computer(t,'A'),b=await computer(t,'B'),r=await runtimeHarness(t);discovered(r,a,b);
@@ -90,7 +100,7 @@ test('a background/foreground transition cannot resume the remaining records of 
   let restart;
   const prepare=r.runtime.store.prepareBroadcast.bind(r.runtime.store);
   r.runtime.store.prepareBroadcast=async(...args)=>{const rows=await prepare(...args);r.stopDiscovery();restart=r.startDiscovery();return rows;};
-  await assert.rejects(r.sendDrafts([draft('cancel-one'),draft('cancel-two')]),/0\/4/);
+  await assert.rejects(r.sendDrafts([draft('cancel-one'),draft('cancel-two')]),/尚未送达任何电脑/);
   await restart;
   assert.equal(a.requests.filter(x=>x.type==='send_text').length,0);
   assert.equal(b.requests.filter(x=>x.type==='send_text').length,0);

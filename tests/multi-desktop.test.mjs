@@ -42,16 +42,19 @@ test('second recipient write failure rolls back all records and preserves the sa
   await assert.rejects(store.prepareBroadcast([d],[endpoint('a'),endpoint('b')]),/disk full/);
   assert.equal((await store.history()).length,0);assert.equal((await store.drafts())[0].content,d.content);
 });
-test('partial success retains home content; another click broadcasts to current targets without original-device restriction',async t=>{
- const {store}=database(t);await store.init();const d=draft();
- const rows=await store.prepareBroadcast([d],[endpoint('a'),endpoint('b')]);
- await store.applyResult(rows[0].id,endpoint('a'),'delivered');
- assert.equal((await store.finishBroadcast([d],rows)).length,0);
- assert.equal((await store.drafts())[0].content,d.content);
- const again=await store.prepareBroadcast([d],[endpoint('a'),endpoint('c')]);
- assert.deepEqual(again.map(r=>r.target_instance),['a','c']);
- for(const r of again)await store.applyResult(r.id,{instanceId:r.target_instance,desktopId:r.target_device},'delivered');
- assert.equal((await store.finishBroadcast([d],again)).length,1);assert.equal((await store.drafts())[0].content,'');
+test('one successful recipient clears only that draft; all-failed draft and newer edits survive',async t=>{
+ const {store}=database(t);await store.init();const d=draft(),failed=draft('failed'),edited=draft('edited');
+ const rows=await store.prepareBroadcast([d,failed,edited],[endpoint('a'),endpoint('b')]);
+ await store.saveDraft({...edited,revision:2,content:'new edit'});
+ for (const r of rows) {
+   if(r.target_instance==='a' && r.draft_id!=='failed')await store.applyResult(r.id,endpoint('a'),'delivered');
+   else await store.markUnconfirmed(r.id,'sleeping');
+ }
+ const done=await store.finishBroadcast([d,failed,edited],rows);
+ assert.deepEqual(done.map(x=>x.id),[d.id,edited.id]);
+ const saved=await store.drafts();assert.equal(saved.find(x=>x.id===d.id).content,'');
+ assert.equal(saved.find(x=>x.id===failed.id).content,failed.content);assert.equal(saved.find(x=>x.id===edited.id).content,'new edit');
+ await store.init();assert.equal((await store.drafts()).find(x=>x.id===d.id).content,'');
 });
 test('no discovered computers keeps the draft intact',async t=>{
  const {store}=database(t);await store.init();const d=draft();await store.saveDraft(d);

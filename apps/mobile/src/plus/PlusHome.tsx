@@ -81,13 +81,12 @@ export default function PlusHome() {
     pushingRef.current=true;setPushing(true);
     try {
       await flush();
-      const sent=await sendDrafts(chosen,completed=>{
-        // Clear only fully delivered snapshots; failed or newer content stays on home.
+      await sendDrafts(chosen,completed=>{
+        // Any confirmed recipient completes this snapshot; newer edits stay on home.
         const archived=clearArchivedDrafts(draftsRef.current,completed);
         update(archived.drafts);setSelected(ids=>ids.filter(id=>!archived.deselect.includes(id)));
-        toast('成功的内容已存入历史');
       });
-      triggerHaptic('success');toast(`已送达 ${sent.computers} 台电脑`);
+      triggerHaptic('success');
     } catch(error) {showError(error);}
     finally {pushingRef.current=false;setPushing(false);await reload().catch(()=>{});}
   }

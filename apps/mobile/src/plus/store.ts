@@ -91,10 +91,10 @@ export class PlusStore {
       for (const d of drafts) {
         const rows = records.filter(r=>r.draft_id===d.id);
         if (!rows.length) continue;
-        let delivered = true;
+        let delivered = false;
         for (const r of rows) {
           const saved = await this.db.getFirstAsync<Outbox>('SELECT * FROM plus_outbox WHERE id=?',r.id);
-          if (saved?.status!=='delivered') delivered=false;
+          if (saved?.status==='delivered') delivered=true;
         }
         if (!delivered) continue;
         await this.db.runAsync("UPDATE plus_drafts SET content='',revision=revision+1,updated_at=?,source_outbox_id=NULL WHERE id=? AND revision=? AND content=?",this.clock(),d.id,d.revision,d.content);
